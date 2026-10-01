@@ -93,7 +93,7 @@ def ingest(
 
 # --- the pipeline: run, resume, status, show ----------------------------------------------
 
-SHOWABLE = ("brief", "roadmap", "spec", "verdict", "digest")
+SHOWABLE = ("brief", "roadmap", "spec", "verdict", "math_spec", "test_result", "digest")
 RunsBase = Annotated[Path | None, typer.Option(help="Where runs/ lives (default: repo)")]
 
 
