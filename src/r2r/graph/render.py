@@ -107,7 +107,7 @@ def _(m: MathSpec) -> str:
     return "\n\n".join(
         [
             f"## Math spec · {m.milestone_id}",
-            f"**Formulation**\n\n$$ {m.formulation} $$",
+            f"**Formulation**\n\n{m.formulation}",  # mixed prose and LaTeX: shown as written
             f"**Algorithm.** {m.algorithm}",
             "**Signatures**\n" + "\n".join(f"- `{s}`" for s in m.signatures),
             f"**Tolerances**\n{tol}",
