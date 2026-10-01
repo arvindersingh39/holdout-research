@@ -7,8 +7,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from r2r.contracts import CriterionResult, MilestoneSpec, ResultDigest
+from pydantic import BaseModel
+
+from r2r.contracts import CriterionResult, Failure, MilestoneSpec, ResultDigest, TestResult
+from r2r.contracts.base import Text
 from r2r.harness.tests import CaseOutcome
+from r2r.llm.gateway import CallContext, call_structured
 from r2r.store.ledger import Ledger
 
 DEVIATIONS_CHARS = 500
@@ -69,3 +73,25 @@ def build_digest(
         cost_usd=ledger.spent(run_id, milestone_id),
         tokens=sum(r.input_tokens + r.output_tokens for r in rows),
     )
+
+
+class DeviationInput(BaseModel):
+    criteria: list[CriterionResult]
+    criteria_text: dict[str, str]
+    failures: list[Failure]
+
+
+class DeviationNote(BaseModel):
+    text: Text(DEVIATIONS_CHARS, 1)
+
+
+def write_deviations(
+    spec: MilestoneSpec, digest: ResultDigest, result: TestResult, ctx: CallContext
+) -> str:
+    """D45: a short LLM note on what deviated, only called when a criterion failed."""
+    payload = DeviationInput(
+        criteria=digest.criteria,
+        criteria_text={c.id: c.text for c in spec.acceptance_criteria},
+        failures=result.failures,
+    )
+    return call_structured("digest", "digest", payload, DeviationNote, ctx).text

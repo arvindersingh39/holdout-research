@@ -72,8 +72,9 @@ def make_deps(
     run_id: str = "g",
     create: bool = True,
     sandbox_factory=LocalProcessBackend,
+    settings=None,
 ) -> RunDeps:
-    settings = load_settings(REPO / "config", env_file=None)
+    settings = settings or load_settings(REPO / "config", env_file=None)
     if create:
         return RunDeps.create(
             run_id,

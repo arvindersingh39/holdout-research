@@ -23,7 +23,7 @@ from r2r.contracts import (
     OptimizationOutcome,
     Roadmap,
 )
-from r2r.digest.builder import build_digest
+from r2r.digest.builder import build_digest, write_deviations
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest, gate_request
 from r2r.graph.render import render, render_attempts, render_files
@@ -358,6 +358,14 @@ def digest(state: PipelineState, deps: RunDeps) -> Update:
         optimizer_attempts=len(state.get("opt_outcomes", [])),
         optimizer_stop=state.get("opt_stop_reason"),
     )
+    if any(not c.passed for c in d.criteria):
+        note = write_deviations(state["spec"], d, result, deps.ctx(m.id))
+        extra = (
+            f" Optimizer stopped: {state['opt_stop_reason']}."
+            if state.get("opt_stop_reason")
+            else ""
+        )
+        d = d.model_validate({**d.model_dump(), "deviations": (note + extra)[:500]})
     return {"digest": d, "test_result": result}
 
 
@@ -524,3 +532,29 @@ def tamper_gate(state: PipelineState, deps: RunDeps) -> Update:
     ws = deps.workspace()
     restore(ws, Git(ws), state["frozen_commit"])
     return update | {"tamper": None}
+
+
+def budget_gate(state: PipelineState, deps: RunDeps) -> Update:
+    """D46: a step would overspend. Shows spend; approve retries the blocked step."""
+    blocked = state.get("budget_blocked") or "?"
+    by_role = deps.ledger.by_role(deps.run_id)
+    rows = "\n".join(f"- {r}: ${s.cost_usd:.4f} ({s.calls} calls)" for r, s in by_role.items())
+    by_ms = "\n".join(
+        f"- {m or 'run-level'}: ${c:.4f}" for m, c in deps.ledger.by_milestone(deps.run_id).items()
+    )
+    caps = deps.settings.budgets
+    md = (
+        f"## Budget exceeded at `{blocked}`\n\n{state.get('budget_message', '')}\n\n"
+        f"Caps: ${caps.usd_cap_milestone:.2f} per milestone, ${caps.usd_cap_run:.2f} per run. "
+        f"Spent so far: ${deps.ledger.spent(deps.run_id):.4f}.\n\n"
+        f"**Spend by role**\n{rows or '- (none)'}\n\n**Spend by milestone**\n{by_ms or '- (none)'}"
+        "\n\nTo continue: quit, raise the caps in `config/budgets.yaml`, `r2r resume`, then "
+        "approve to retry the blocked step."
+    )
+    d = _ask(GateRequest(gate="budget", title=f"Budget exceeded at {blocked}", markdown=md))
+    update: Update = {"human_decision": d, "budget_blocked": None, "budget_message": None}
+    if d.action == "stop":
+        return update | {"status": "stopped"}
+    if d.action == "redirect":
+        return update | {"human_note": d.note, "budget_retry": "long_plan"}
+    return update | {"budget_retry": blocked}

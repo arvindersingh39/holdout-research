@@ -116,6 +116,34 @@ class Ledger:
             for r in rows
         }
 
+    def by_milestone(self, run_id: str) -> dict[str | None, float]:
+        with closing(sqlite3.connect(self.path)) as db:
+            rows = db.execute(
+                "SELECT milestone_id, SUM(cost_usd) FROM llm_calls WHERE run_id = ? "
+                "GROUP BY milestone_id ORDER BY milestone_id",
+                (run_id,),
+            ).fetchall()
+        return {m: float(c) for m, c in rows}
+
+    def by_model(self, run_id: str) -> dict[str, RoleSpend]:
+        with closing(sqlite3.connect(self.path)) as db:
+            rows = db.execute(
+                "SELECT model, COUNT(*), SUM(input_tokens), SUM(output_tokens), "
+                "SUM(cache_read_tokens), SUM(cost_usd) FROM llm_calls WHERE run_id = ? "
+                "GROUP BY model ORDER BY model",
+                (run_id,),
+            ).fetchall()
+        return {
+            r[0]: RoleSpend(
+                calls=r[1],
+                input_tokens=r[2],
+                output_tokens=r[3],
+                cache_read_tokens=r[4],
+                cost_usd=r[5],
+            )
+            for r in rows
+        }
+
     def rows(self, run_id: str) -> list[CallRecord]:
         with closing(sqlite3.connect(self.path)) as db:
             cur = db.execute(

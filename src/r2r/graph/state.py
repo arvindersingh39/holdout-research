@@ -51,3 +51,6 @@ class PipelineState(TypedDict, total=False):
     digest: ResultDigest | None
     human_decision: HumanDecision | None
     human_note: str | None  # a redirect note waiting for the long-term planner
+    budget_blocked: str | None  # node that hit BudgetExceeded (D46)
+    budget_message: str | None
+    budget_retry: str | None  # where the budget gate sends the run next

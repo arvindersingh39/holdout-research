@@ -8,7 +8,15 @@ from r2r.contracts import CoordinatorVerdict, HumanDecision, Milestone, Roadmap
 
 END = "__end__"
 GateKind = Literal[
-    "roadmap", "escalation", "tests", "design", "coder", "tamper", "result", "publication"
+    "roadmap",
+    "escalation",
+    "tests",
+    "design",
+    "coder",
+    "tamper",
+    "budget",
+    "result",
+    "publication",
 ]
 _FINISHED = {"done", "skipped"}
 

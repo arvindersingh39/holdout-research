@@ -30,6 +30,7 @@ from r2r.graph.routing import (
     route_after_optimize,
 )
 from r2r.graph.state import PipelineState
+from r2r.llm.gateway import BudgetExceeded
 
 GATES: dict[GateKind, Callable] = {
     "roadmap": nodes.roadmap_gate,
@@ -38,8 +39,36 @@ GATES: dict[GateKind, Callable] = {
     "design": nodes.design_gate,
     "coder": nodes.coder_gate,
     "tamper": nodes.tamper_gate,
+    "budget": nodes.budget_gate,
     "result": nodes.result_gate,
 }
+
+# Nodes that call an LLM: a BudgetExceeded there routes to the budget gate (D46). The optimizer
+# loop handles its own budget stop (D40).
+GUARDED = ("retrieve", "long_plan", "short_plan", "coordinate", "design", "code", "digest")
+
+
+def _guard(name: str, fn: Callable, deps: RunDeps) -> Callable:
+    def node(state: PipelineState) -> dict:
+        try:
+            return fn(state, deps=deps)
+        except BudgetExceeded as e:
+            return {"budget_blocked": name, "budget_message": str(e)}
+
+    return node
+
+
+def _guarded_route(name: str, route: Callable[[PipelineState], str]) -> Callable:
+    def r(state: PipelineState) -> str:
+        return "budget_gate" if state.get("budget_blocked") == name else route(state)
+
+    return r
+
+
+def _after_budget_gate(state: PipelineState) -> str:
+    if state["human_decision"].action == "stop":
+        return END
+    return state.get("budget_retry") or "long_plan"
 
 
 def _after_long_plan(state: PipelineState) -> str:
@@ -99,34 +128,41 @@ def build_graph(deps: RunDeps) -> StateGraph:
         "finish": nodes.finish,
     }
     for name, fn in work.items():
-        g.add_node(name, partial(fn, deps=deps))
+        node = _guard(name, fn, deps) if name in GUARDED else partial(fn, deps=deps)
+        g.add_node(name, node)
     for kind, fn in GATES.items():
         g.add_node(f"{kind}_gate", partial(fn, deps=deps))
 
-    g.add_edge(START, "retrieve")
-    g.add_edge("retrieve", "long_plan")
-    g.add_conditional_edges("long_plan", _after_long_plan, ["finish", "roadmap_gate", "short_plan"])
-    g.add_edge("short_plan", "coordinate")
+    def edge(src: str, route: Callable[[PipelineState], str], targets: list[str]) -> None:
+        if src in GUARDED:
+            g.add_conditional_edges(src, _guarded_route(src, route), [*targets, "budget_gate"])
+        else:
+            g.add_conditional_edges(src, route, targets)
+
     b = deps.settings.budgets
-    g.add_conditional_edges(
+    g.add_edge(START, "retrieve")
+    edge("retrieve", lambda s: "long_plan", ["long_plan"])
+    edge("long_plan", _after_long_plan, ["finish", "roadmap_gate", "short_plan"])
+    edge("short_plan", lambda s: "coordinate", ["coordinate"])
+    edge(
         "coordinate",
         partial(_after_coordinate, max_rounds=b.coordinator_max_revise_rounds),
         ["design", "short_plan", "long_plan", "escalation_gate"],
     )
-    g.add_conditional_edges(
+    edge(
         "design",
         partial(_after_design, review_tests=b.gates.review_tests),
         ["tests_gate", "freeze", "design", "design_gate"],
     )
     g.add_edge("freeze", "code")
-    g.add_conditional_edges(
+    edge(
         "code",
         partial(_after_code, max_sessions=b.coder_max_sessions),
         ["tamper_gate", "opt_baseline", "code", "coder_gate"],
     )
-    g.add_conditional_edges("opt_baseline", _after_opt_baseline, ["digest", "optimize"])
-    g.add_conditional_edges("optimize", _after_optimize, ["tamper_gate", "digest", "optimize"])
-    g.add_edge("digest", "result_gate")
+    edge("opt_baseline", _after_opt_baseline, ["digest", "optimize"])
+    edge("optimize", _after_optimize, ["tamper_gate", "digest", "optimize"])
+    edge("digest", lambda s: "result_gate", ["result_gate"])
     targets = {
         "roadmap": ["short_plan", "long_plan", END],
         "escalation": ["design", "long_plan", END],
@@ -136,8 +172,9 @@ def build_graph(deps: RunDeps) -> StateGraph:
         "tamper": ["code", "long_plan", END],
         "result": ["long_plan", END],
     }
-    for kind in GATES:
-        g.add_conditional_edges(f"{kind}_gate", partial(_after_gate, gate=kind), targets[kind])
+    for kind, dests in targets.items():
+        g.add_conditional_edges(f"{kind}_gate", partial(_after_gate, gate=kind), dests)
+    g.add_conditional_edges("budget_gate", _after_budget_gate, [*GUARDED, END])
     g.add_edge("finish", END)
     return g
 
