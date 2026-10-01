@@ -224,3 +224,57 @@ def test_fake_embeddings_are_lexical(fake: FakeLLM) -> None:
         )
 
     assert cos(a, b) > cos(a, c)
+
+
+# --- tool-loop conversation caching (D31) ----------------------------------------------
+
+
+def test_tool_loop_caches_newest_message_for_anthropic(ctx: CallContext, fake: FakeLLM) -> None:
+    from pydantic import BaseModel
+    from samples import milestone_spec
+
+    from r2r.llm.fake import tool_call
+    from r2r.llm.gateway import run_tool_loop
+    from r2r.llm.tools import Tool
+
+    class NoArgs(BaseModel):
+        pass
+
+    tools = [Tool(name="ping", description="ping", input_model=NoArgs, handler=lambda _: "pong")]
+    fake.script("coder", [tool_call("ping")], "done")
+    run_tool_loop("coder", "coder", milestone_spec(), tools, 5, lambda s: False, ctx)
+    second = fake.calls[1].messages
+    marked = [
+        m
+        for m in second
+        if isinstance(m.get("content"), list) and any("cache_control" in b for b in m["content"])
+    ]
+    assert [m["role"] for m in marked] == ["system", "tool"]  # system prefix + newest message
+    assert second[-1]["content"][0]["text"] == "pong"
+    # earlier requests are not mutated after the fact
+    assert not any(
+        isinstance(m.get("content"), list)
+        and m["role"] == "user"
+        and "cache_control" in m["content"][0]
+        for m in second
+    )
+
+
+def test_tool_loop_no_cache_point_for_other_providers(ctx: CallContext, fake: FakeLLM) -> None:
+    from pydantic import BaseModel
+    from samples import milestone_spec
+
+    from r2r.llm.fake import tool_call
+    from r2r.llm.gateway import run_tool_loop
+    from r2r.llm.tools import Tool
+
+    class NoArgs(BaseModel):
+        pass
+
+    tools = [Tool(name="ping", description="ping", input_model=NoArgs, handler=lambda _: "pong")]
+    fake.script("optimizer", [tool_call("ping")], "done")
+    run_tool_loop("optimizer", "optimizer", milestone_spec(), tools, 5, lambda s: False, ctx)
+    assert all(
+        isinstance(m["content"], str) or m["role"] == "system" or m["content"] is None
+        for m in fake.calls[1].messages
+    )

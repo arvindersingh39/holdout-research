@@ -162,7 +162,7 @@ def run_tool_loop(
         req = LLMRequest(
             role=role,
             model=model,
-            messages=list(messages),
+            messages=_with_cache_point(messages, model, ctx),
             max_tokens=max_out,
             tools=schemas,
             tool_choice="auto",
@@ -232,6 +232,24 @@ def _embed_batch(model: str, batch: list[str], ctx: CallContext) -> list[list[fl
             _record(ctx, req, resp=LLMResponse(model=model, input_tokens=tokens), cost=cost)
             return resp.vectors
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _with_cache_point(
+    messages: list[dict[str, Any]], model: str, ctx: CallContext
+) -> list[dict[str, Any]]:
+    """D31: for Anthropic models, mark the newest message as a cache point so each tool-loop turn
+    reads the earlier conversation from cache. Returns a copy; `messages` is never mutated."""
+    out = list(messages)
+    if not (ctx.settings.models.cache_prefix and model.startswith("anthropic/")):
+        return out
+    last = dict(out[-1])
+    content = last.get("content")
+    if isinstance(content, str) and content:
+        last["content"] = [
+            {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
+        ]
+        out[-1] = last
+    return out
 
 
 # --- one metered provider call ----------------------------------------------------------

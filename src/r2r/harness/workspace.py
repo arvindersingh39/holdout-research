@@ -57,8 +57,9 @@ class Workspace:
         return cls(paths.workspace, paths.workspace_git, paths.frozen_manifest)
 
 
-def safe_path(root: Path, rel: str, allowed: tuple[str, ...]) -> Path:
-    """Resolve `rel` inside `root`, only under one of the `allowed` top-level dirs, never frozen."""
+def safe_path(root: Path, rel: str, allowed: tuple[str, ...], allow_frozen: bool = False) -> Path:
+    """Resolve `rel` inside `root`, only under one of the `allowed` dirs. Frozen dirs are refused
+    unless `allow_frozen` (the math-designer flow, before `freeze()`)."""
     p = Path(rel)
     if p.is_absolute() or ".." in p.parts or not p.parts:
         raise UnsafePath(f"path must be relative, without '..': {rel!r}")
@@ -67,7 +68,7 @@ def safe_path(root: Path, rel: str, allowed: tuple[str, ...]) -> Path:
     if not resolved.is_relative_to(base):
         raise UnsafePath(f"path escapes the workspace: {rel!r}")
     inner = resolved.relative_to(base)
-    if any(inner.is_relative_to(f) for f in FROZEN_DIRS):
+    if not allow_frozen and any(inner.is_relative_to(f) for f in FROZEN_DIRS):
         raise UnsafePath(f"frozen directories are read-only: {rel!r}")
     if not any(inner.is_relative_to(a) for a in allowed):
         raise UnsafePath(f"path must be under {', '.join(allowed)}: {rel!r}")

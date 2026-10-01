@@ -44,8 +44,14 @@ def _loop(ctx: CallContext, max_turns: int = 5, stop_fn=lambda s: False):
     return run_tool_loop("coder", "coder", milestone_spec(), TOOLS, max_turns, stop_fn, ctx)
 
 
-def _tool_messages(fake: FakeLLM, call: int) -> list[dict]:
-    return [m for m in fake.calls[call].messages if m["role"] == "tool"]
+def _text(msg: dict) -> str:
+    """Message text whether plain or as content blocks (Anthropic cache points, D31)."""
+    c = msg["content"]
+    return c if isinstance(c, str) else "".join(b.get("text", "") for b in c)
+
+
+def _tool_messages(fake: FakeLLM, call: int) -> list[str]:
+    return [_text(m) for m in fake.calls[call].messages if m["role"] == "tool"]
 
 
 def test_stops_when_model_stops_calling_tools(ctx: CallContext, fake: FakeLLM) -> None:
@@ -54,7 +60,7 @@ def test_stops_when_model_stops_calling_tools(ctx: CallContext, fake: FakeLLM) -
     assert res.stopped_by == "no_tool_calls"
     assert res.final_text == "done"
     assert res.turns == 2
-    assert _tool_messages(fake, 1)[0]["content"] == "5"
+    assert _tool_messages(fake, 1)[0] == "5"
     assert len(ctx.ledger.rows("run-test")) == 2  # one row per turn
 
 
@@ -80,7 +86,7 @@ def test_max_turns(ctx: CallContext, fake: FakeLLM) -> None:
 def test_tool_output_capped(ctx: CallContext, fake: FakeLLM) -> None:
     fake.script("coder", [tool_call("big")], "ok")
     _loop(ctx)
-    out = _tool_messages(fake, 1)[0]["content"]
+    out = _tool_messages(fake, 1)[0]
     assert out.startswith("x" * 100)
     assert "truncated" in out
     assert len(out) < 200
@@ -98,7 +104,7 @@ def test_tool_errors_reported_to_model(ctx: CallContext, fake: FakeLLM, call, ex
     fake.script("coder", [call], "giving up")
     res = _loop(ctx)
     assert res.stopped_by == "no_tool_calls"
-    assert expected in _tool_messages(fake, 1)[0]["content"]
+    assert expected in _tool_messages(fake, 1)[0]
 
 
 def test_tools_sent_in_request(ctx: CallContext, fake: FakeLLM) -> None:
@@ -107,4 +113,4 @@ def test_tools_sent_in_request(ctx: CallContext, fake: FakeLLM) -> None:
     req = fake.calls[0]
     assert [t["function"]["name"] for t in req.tools] == ["add", "big", "boom"]
     assert req.tool_choice == "auto"
-    assert "<data>" in req.messages[1]["content"]
+    assert "<data>" in _text(req.messages[1])
