@@ -1,6 +1,7 @@
 """Live Langfuse check (D47): one cheap call is traced and tagged. R2R_LIVE=1, after approval."""
 
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -40,19 +41,25 @@ def test_call_is_traced_in_langfuse(tmp_path: Path) -> None:
     assert (
         call_structured("short_planner", "echo", Question(text="2 + 2?"), Answer, ctx).answer == 4
     )
+    # New Langfuse orgs (after 2026-09-16) only have the v2 observations API; GET /traces is 410.
     auth = (s.langfuse_public_key.get_secret_value(), s.langfuse_secret_key.get_secret_value())
-    found = []
-    for _ in range(24):  # the OTEL exporter batches; allow up to 2 minutes
+    since = datetime.now(UTC) - timedelta(minutes=10)
+    mine: list[dict] = []
+    for _ in range(24):  # the exporter batches; allow up to 2 minutes
         time.sleep(5)
         r = httpx.get(
-            f"{s.langfuse_host.rstrip('/')}/api/public/traces",
-            params={"tags": f"run:{run_id}"},
+            f"{s.langfuse_host.rstrip('/')}/api/public/v2/observations",
+            params={
+                "fromStartTime": since.isoformat(),
+                "toStartTime": datetime.now(UTC).isoformat(),
+            },
             auth=auth,
             timeout=20,
         )
-        found = r.json().get("data", []) if r.status_code == 200 else []
-        if found:
+        r.raise_for_status()
+        mine = [o for o in r.json().get("data", []) if o.get("sessionId") == run_id]
+        if mine:
             break
-    print(f"\ntraces for {run_id}: {len(found)}")
-    assert found, "no trace arrived in Langfuse"
-    assert "role:short_planner" in found[0].get("tags", [])
+    print(f"\nobservations for session {run_id}: {len(mine)}")
+    assert mine, "no observation arrived in Langfuse"
+    assert mine[0]["name"] == "short_planner" and mine[0]["type"] == "GENERATION"
