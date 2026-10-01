@@ -1,0 +1,34 @@
+usd_cap_run: 20.0
+usd_cap_milestone: 3.0
+coordinator_max_revise_rounds: 2
+coder_max_turns: 25
+coder_escalate_after: 2          # failed sessions before switching to escalate_to
+coder_max_sessions: 3            # then a human gate
+optimizer_max_attempts: 4
+optimizer_min_gain: 0.05         # 5% runtime improvement
+optimizer_patience: 2            # consecutive attempts below min_gain, then stop
+optimizer_target_runtime_s: null # set per milestone by MathSpec.bench when known
+bench_repeats: 5                 # rerun with 9 if coefficient of variation > 10%
+sandbox: {cpus: 2, memory: 4g, pids: 256, test_timeout_s: 300, bench_timeout_s: 600}
+context_pack_tokens: {short_planner: 1500, math_designer: 2500, writer_section: 2000}
+gates:
+  channel: whatsapp                  # cli | whatsapp (D2); tests use cli
+  approve_first_roadmap: true
+  roadmap_changes: material_only     # milestones added/removed/reordered or goal changed
+  review_tests: first_milestone      # always | first_milestone | never
+  remind_after_h: 24                 # re-ping while a gate waits (a template if the window is closed)
+  max_reminders: 3
+  full_text: attach                  # attach the full contract as a document | summary_only
+  whatsapp:
+    gate_template: r2r_gate_waiting  # approved utility template with one quick-reply button
+    template_lang: en_US
+    batch_pending_gates: true        # one ping covers every waiting gate
+contract_token_caps:
+  ResearchBrief: 3000
+  Roadmap: 2000
+  MilestoneSpec: 1500
+  MathSpec: 2500
+  CoordinatorVerdict: 300
+  TestResult: 1500
+  ProfileReport: 1000
+  ResultDigest: 800
