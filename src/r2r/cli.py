@@ -95,6 +95,9 @@ def ingest(
 
 SHOWABLE = ("brief", "roadmap", "spec", "verdict", "math_spec", "test_result", "digest")
 RunsBase = Annotated[Path | None, typer.Option(help="Where runs/ lives (default: repo)")]
+ChannelOpt = Annotated[
+    str | None, typer.Option(help="Gate channel: terminal or whatsapp (default: budgets.yaml)")
+]
 
 
 def _deps(run_id: str, runs_base: Path | None, proposal: Path | None = None):
@@ -123,28 +126,56 @@ def _deps(run_id: str, runs_base: Path | None, proposal: Path | None = None):
         raise typer.Exit(2) from None
 
 
-def make_channel(settings: Settings):
-    """The gate channel from budgets.yaml. WhatsApp arrives in Phase 7; until then, terminal."""
+def _whatsapp_ready(settings: Settings) -> bool:
+    s = settings.secrets
+    return bool(s.whatsapp_access_token and s.whatsapp_phone_number_id and s.whatsapp_owner_number)
+
+
+def _whatsapp_parts(settings: Settings, root: Path):
+    from r2r.whatsapp.client import GraphClient
+    from r2r.whatsapp.store import GateStore
+
+    s = settings.secrets
+    store = GateStore(root / "runs" / "whatsapp.sqlite")
+    client = GraphClient(s.whatsapp_access_token.get_secret_value(), s.whatsapp_phone_number_id)
+    gates = settings.budgets.gates.whatsapp.model_dump() | {
+        "remind_after_h": settings.budgets.gates.remind_after_h,
+        "max_reminders": settings.budgets.gates.max_reminders,
+        "full_text": settings.budgets.gates.full_text,
+    }
+    return store, client, s.whatsapp_owner_number, gates
+
+
+def make_channel(settings: Settings, override: str | None = None):
+    """budgets.yaml `gates.channel` (D2), or `--channel`. WhatsApp needs its keys in .env."""
     from r2r.graph.gates import TerminalChannel
 
-    if settings.budgets.gates.channel == "whatsapp":
-        console.print("[yellow]WhatsApp gates arrive in Phase 7; using the terminal for now.[/]")
+    wanted = override or settings.budgets.gates.channel
+    if wanted == "whatsapp":
+        if _whatsapp_ready(settings):
+            from r2r.whatsapp.channel import WhatsAppChannel
+
+            store, client, owner, gates = _whatsapp_parts(settings, project_root())
+            return WhatsAppChannel(store, client, owner, gates)
+        console.print("[yellow]WhatsApp keys are not set in .env; using the terminal.[/]")
     return TerminalChannel(console=console)
 
 
-def _drive(deps, start: bool) -> None:
+def _drive(deps, start: bool, channel: str | None = None) -> None:
     from r2r.graph.driver import drive, open_graph
     from r2r.llm.gateway import BudgetExceeded, ContractViolation
 
     with open_graph(deps) as graph:
         try:
-            result = drive(graph, deps.run_id, make_channel(deps.settings), start=start)
+            result = drive(graph, deps.run_id, make_channel(deps.settings, channel), start=start)
         except (BudgetExceeded, ContractViolation) as e:
             console.print(f"[red]{type(e).__name__}:[/] {e}")
             console.print(f"Progress is saved. Fix the cause, then `r2r resume {deps.run_id}`.")
             raise typer.Exit(1) from None
     spent = deps.ledger.spent(deps.run_id)
     console.print(f"Run {deps.run_id}: [bold]{result.status}[/] · spent ${spent:.4f}")
+    if result.status == "paused":
+        console.print(f"Waiting at a gate. Continue with `r2r resume {deps.run_id}`.")
 
 
 @app.command()
@@ -152,19 +183,20 @@ def run(
     proposal: Annotated[Path, typer.Option(help="Folder with proposal.md and optional papers/")],
     run_id: Annotated[str | None, typer.Option(help="Run id (default: folder name + time)")] = None,
     runs_base: RunsBase = None,
+    channel: ChannelOpt = None,
 ) -> None:
     """Start a run: retrieve, plan, and stop at every human gate."""
     if not (proposal / "proposal.md").is_file():
         console.print(f"[red]{proposal}/proposal.md not found[/]")
         raise typer.Exit(2)
     run_id = run_id or f"{proposal.resolve().name}-{datetime.now():%Y%m%d-%H%M%S}"
-    _drive(_deps(run_id, runs_base, proposal), start=True)
+    _drive(_deps(run_id, runs_base, proposal), start=True, channel=channel)
 
 
 @app.command()
-def resume(run_id: str, runs_base: RunsBase = None) -> None:
+def resume(run_id: str, runs_base: RunsBase = None, channel: ChannelOpt = None) -> None:
     """Continue a run from its last checkpoint (for example a gate you left pending)."""
-    _drive(_deps(run_id, runs_base), start=False)
+    _drive(_deps(run_id, runs_base), start=False, channel=channel)
 
 
 @app.command()
@@ -254,6 +286,64 @@ def costs(run_id: str, runs_base: RunsBase = None) -> None:
         f"[bold]Total ${led.spent(run_id):.4f}[/]  ·  compare: console.anthropic.com "
         "(Usage) and openrouter.ai/activity"
     )
+
+
+@app.command()
+def bot(
+    port: Annotated[int, typer.Option(help="Local port your tunnel forwards to")] = 8787,
+) -> None:
+    """WhatsApp gate bot: webhook receiver + reminders. Decisions start `r2r resume RUN_ID`."""
+    import subprocess
+    import sys
+    import threading
+    import time as _time
+
+    import uvicorn
+
+    from r2r.log import configure_logging
+    from r2r.whatsapp.bot import Bot
+    from r2r.whatsapp.webhook import create_app
+
+    root = project_root()
+    settings = load_settings(root / "config", root / ".env")
+    configure_logging("INFO", settings.secrets)
+    s = settings.secrets
+    if not (_whatsapp_ready(settings) and s.whatsapp_app_secret and s.whatsapp_verify_token):
+        console.print("[red]Set the WHATSAPP_* values in .env first (PLAN §13).[/]")
+        raise typer.Exit(2)
+    store, client, owner, gates = _whatsapp_parts(settings, root)
+
+    def spawn_resume(run_id: str) -> None:
+        log_file = (root / "runs" / run_id / "resume.log").open("a")
+        subprocess.Popen(
+            [sys.executable, "-m", "r2r.cli", "resume", run_id],
+            cwd=root,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+    the_bot = Bot(store, client, owner, gates, spawn_resume)
+
+    def reminders() -> None:
+        while True:
+            _time.sleep(60)
+            try:
+                the_bot.remind()
+            except Exception as e:  # keep the bot alive; the next tick retries
+                console.print(f"[yellow]reminder failed: {type(e).__name__}[/]")
+
+    threading.Thread(target=reminders, daemon=True).start()
+    app_ = create_app(
+        the_bot,
+        s.whatsapp_app_secret.get_secret_value(),
+        s.whatsapp_verify_token.get_secret_value(),
+    )
+    console.print(
+        f"r2r bot listening on http://127.0.0.1:{port}/webhook "
+        f"(public: {s.public_webhook_url or 'set PUBLIC_WEBHOOK_URL'})"
+    )
+    uvicorn.run(app_, host="127.0.0.1", port=port, log_level="warning")
 
 
 # --- sandbox ----------------------------------------------------------------------------------
