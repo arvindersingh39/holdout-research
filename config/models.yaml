@@ -10,7 +10,7 @@ roles:
   math_designer: {model: openrouter/google/gemini-3.1-pro-preview, max_tokens: 16000}
   coder:         {model: anthropic/claude-sonnet-5-5,              max_tokens: 4000,
                   escalate_to: anthropic/claude-opus-5-5}
-  optimizer:     {model: openrouter/google/gemini-3.8-flash,       max_tokens: 3000}
+  optimizer:     {model: openrouter/google/gemini-3.8-flash,       max_tokens: 12000}
   digest:        {model: openrouter/google/gemini-3.8-flash,       max_tokens: 300}  # deviations note only
   writer:        {model: anthropic/claude-opus-5-5,                max_tokens: 6000}
 embeddings:      {model: local/all-MiniLM-L6-v2}   # Chroma's built-in ONNX model; no API, no torch

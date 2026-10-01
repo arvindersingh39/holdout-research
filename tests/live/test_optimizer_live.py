@@ -23,7 +23,7 @@ from r2r.harness.sandbox import DockerBackend
 from r2r.harness.stoprule import decide
 from r2r.harness.workspace import Workspace
 from r2r.llm.client import LiteLLMClient
-from r2r.llm.gateway import CallContext
+from r2r.llm.gateway import CallContext, ContractViolation
 from r2r.settings import load_settings
 from r2r.store.ledger import Ledger
 from r2r.store.runs import run_paths
@@ -45,15 +45,32 @@ def optimize_until_stop(ws, box, ms: MathSpec, ctx: CallContext) -> tuple[list, 
     patches: list[OptimizationPatch | None] = []
     action, reason = decide([], cfg, ms.bench.target_runtime_s, b.runtime_s)
     while action == "continue":
-        patch = run_optimizer(
-            current.profile,
-            hotspot_source(ws, current.profile),
-            current.runtime_s,
-            ms.bench.target_runtime_s,
-            ms,
-            notes(patches, outcomes),
-            ctx,
-        )
+        try:
+            patch = run_optimizer(
+                current.profile,
+                hotspot_source(ws, current.profile),
+                current.runtime_s,
+                ms.bench.target_runtime_s,
+                ms,
+                notes(patches, outcomes),
+                ctx,
+            )
+        except ContractViolation as e:  # same as the graph node: a failed attempt, not a crash
+            out = OptimizationOutcome(
+                created_by="harness",
+                run_id=ctx.run_id,
+                milestone_id=ctx.milestone_id,
+                attempt=len(outcomes) + 1,
+                accepted=False,
+                reason=f"rejected: no valid patch ({str(e)[:150]})",
+                runtime_before_s=current.runtime_s,
+                sloc_before=current.sloc,
+            )
+            console.print(f"#{out.attempt} no valid patch → {out.reason}")
+            outcomes.append(out)
+            patches.append(None)
+            action, reason = decide(outcomes, cfg, ms.bench.target_runtime_s, b.runtime_s)
+            continue
         out = try_patch(
             ws,
             box,
