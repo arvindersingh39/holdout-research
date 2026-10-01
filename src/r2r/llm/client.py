@@ -39,7 +39,7 @@ class LLMResponse(BaseModel):
     cache_write_tokens: int = 0
     cost_usd: float | None = None  # None: the gateway prices it
     latency_ms: int = 0
-    reasoning_chars: int = 0  # visible thinking text, if the provider returned any
+    reasoning_tokens: int = 0  # thinking tokens billed (Anthropic returns no thinking text)
 
 
 class EmbedResponse(BaseModel):
@@ -141,7 +141,10 @@ class LiteLLMClient:
             cache_write_tokens=getattr(usage, "cache_creation_input_tokens", None) or 0,
             cost_usd=cost,
             latency_ms=latency,
-            reasoning_chars=len(getattr(msg, "reasoning_content", None) or ""),
+            reasoning_tokens=getattr(
+                getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None
+            )
+            or 0,
         )
 
     def embed(self, model: str, texts: list[str]) -> EmbedResponse:

@@ -80,5 +80,5 @@ def test_pilot_to_reviewed_spec(tmp_path: Path) -> None:
             visible = estimate_tokens(resp.text or "", req.model)
             console.print(
                 f"long_planner: billed out={resp.output_tokens} visible≈{visible} "
-                f"reasoning_chars={resp.reasoning_chars} thinking={req.thinking}"
+                f"reasoning_tokens={resp.reasoning_tokens} thinking={req.thinking}"
             )
