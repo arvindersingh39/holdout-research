@@ -41,6 +41,12 @@ class LLMResponse(BaseModel):
     latency_ms: int = 0
 
 
+class EmbedResponse(BaseModel):
+    vectors: list[list[float]]
+    input_tokens: int = 0
+    cost_usd: float | None = None  # None: the gateway prices it
+
+
 @dataclass
 class LLMRequest:
     role: str
@@ -58,6 +64,8 @@ class LLMRequest:
 class LLMClient(Protocol):
     def complete(self, req: LLMRequest) -> LLMResponse: ...
 
+    def embed(self, model: str, texts: list[str]) -> EmbedResponse: ...
+
     def supports_response_schema(self, model: str) -> bool: ...
 
     def prices(self, model: str) -> tuple[float, float] | None:
@@ -69,9 +77,13 @@ _KEY_FIELD = {"anthropic": "anthropic_api_key", "gemini": "gemini_api_key",
               "openrouter": "openrouter_api_key"}  # fmt: skip
 
 
+LOCAL_EMBEDDERS = {"local/all-MiniLM-L6-v2"}
+
+
 class LiteLLMClient:
     def __init__(self, secrets: Secrets) -> None:
         self._secrets = secrets
+        self._local_embedder: Any = None
 
     def _api_key(self, model: str) -> str | None:
         field_name = _KEY_FIELD.get(model.split("/", 1)[0])
@@ -130,6 +142,36 @@ class LiteLLMClient:
             latency_ms=latency,
         )
 
+    def embed(self, model: str, texts: list[str]) -> EmbedResponse:
+        if model.startswith("local/"):
+            return EmbedResponse(vectors=self._embed_local(model, texts))
+        import litellm
+
+        try:
+            resp = litellm.embedding(model=model, input=texts, api_key=self._api_key(model))
+        except Exception as e:
+            raise LLMCallError(_short(e)) from None
+        usage = getattr(resp, "usage", None)
+        try:
+            cost = float(litellm.completion_cost(completion_response=resp))
+        except Exception:
+            cost = None
+        return EmbedResponse(
+            vectors=[list(map(float, d["embedding"])) for d in resp.data],
+            input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            cost_usd=cost,
+        )
+
+    def _embed_local(self, model: str, texts: list[str]) -> list[list[float]]:
+        """Chroma's bundled MiniLM ONNX model: runs on this machine, downloaded once (~80 MB)."""
+        if model not in LOCAL_EMBEDDERS:
+            raise LLMCallError(f"unknown local embedding model {model}")
+        if self._local_embedder is None:
+            from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+
+            self._local_embedder = DefaultEmbeddingFunction()
+        return [list(map(float, v)) for v in self._local_embedder(texts)]
+
     def supports_response_schema(self, model: str) -> bool:
         import litellm
 
@@ -139,6 +181,8 @@ class LiteLLMClient:
             return False
 
     def prices(self, model: str) -> tuple[float, float] | None:
+        if model.startswith("local/"):
+            return 0.0, 0.0
         import litellm
 
         try:

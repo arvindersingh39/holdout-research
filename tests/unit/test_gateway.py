@@ -169,3 +169,49 @@ def test_unknown_role_rejected(ctx: CallContext) -> None:
 def _roadmap_json() -> str:
     data = roadmap().model_dump(exclude={"created_by", "run_id", "milestone_id"})
     return json.dumps(data)
+
+
+# --- embeddings ---------------------------------------------------------------------
+
+
+def test_embed_local_model_is_ledgered_at_zero_cost(ctx: CallContext, fake: FakeLLM) -> None:
+    from r2r.llm.gateway import embed
+
+    vectors = embed(["monte carlo pricing", "control variates"], ctx)
+    assert len(vectors) == 2 and len(vectors[0]) == len(vectors[1]) > 0
+    assert fake.embed_calls == [("local/all-MiniLM-L6-v2", 2)]
+    (row,) = ctx.ledger.rows("run-test")
+    assert (row.role, row.model, row.cost_usd, row.ok) == (
+        "embeddings", "local/all-MiniLM-L6-v2", 0.0, True,
+    )  # fmt: skip
+    assert row.input_tokens > 0
+
+
+def test_embed_empty_makes_no_call(ctx: CallContext, fake: FakeLLM) -> None:
+    from r2r.llm.gateway import embed
+
+    assert embed([], ctx) == []
+    assert fake.embed_calls == []
+    assert ctx.ledger.rows("run-test") == []
+
+
+def test_embed_batches(ctx: CallContext, fake: FakeLLM) -> None:
+    from r2r.llm.gateway import EMBED_BATCH, embed
+
+    assert len(embed(["t"] * (EMBED_BATCH + 3), ctx)) == EMBED_BATCH + 3
+    assert [n for _, n in fake.embed_calls] == [EMBED_BATCH, 3]
+    assert len(ctx.ledger.rows("run-test")) == 2
+
+
+def test_fake_embeddings_are_lexical(fake: FakeLLM) -> None:
+    import math
+
+    a, b, c = fake.embed("local/x", ["option pricing monte carlo", "monte carlo option",
+                                     "protein folding"]).vectors  # fmt: skip
+
+    def cos(u, v):
+        return sum(x * y for x, y in zip(u, v, strict=True)) / (
+            math.sqrt(sum(x * x for x in u)) * math.sqrt(sum(y * y for y in v))
+        )
+
+    assert cos(a, b) > cos(a, c)

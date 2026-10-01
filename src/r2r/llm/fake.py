@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
+import re
 from collections import defaultdict, deque
 from itertools import count
 from typing import Any
@@ -10,10 +13,11 @@ from typing import Any
 from pydantic import BaseModel
 
 from r2r.contracts import Contract
-from r2r.llm.client import LLMRequest, LLMResponse, ToolCall
+from r2r.llm.client import EmbedResponse, LLMRequest, LLMResponse, ToolCall
 from r2r.llm.tokens import estimate_tokens
 
 _META = {"created_by", "run_id", "milestone_id"}
+EMBED_DIM = 64
 _ids = count(1)
 
 # A scripted reply is one of:
@@ -42,6 +46,7 @@ class FakeLLM:
         self._prices = prices
         self._native = native_schema
         self.calls: list[LLMRequest] = []
+        self.embed_calls: list[tuple[str, int]] = []
 
     def script(self, role: str, *replies: Scripted) -> None:
         self._queues[role].extend(replies)
@@ -81,8 +86,24 @@ class FakeLLM:
             output_tokens=max(1, estimate_tokens(out_text)),
         )
 
+    def embed(self, model: str, texts: list[str]) -> EmbedResponse:
+        """Bag-of-words hashing vectors: deterministic, and similar texts score as similar."""
+        self.embed_calls.append((model, len(texts)))
+        return EmbedResponse(
+            vectors=[_hash_vector(t) for t in texts],
+            input_tokens=sum(estimate_tokens(t) for t in texts),
+        )
+
     def supports_response_schema(self, model: str) -> bool:
         return self._native
 
     def prices(self, model: str) -> tuple[float, float] | None:
-        return self._prices
+        return (0.0, 0.0) if model.startswith("local/") else self._prices
+
+
+def _hash_vector(text: str) -> list[float]:
+    vec = [0.0] * EMBED_DIM
+    for word in re.findall(r"[a-z0-9]+", text.lower()):
+        vec[int(hashlib.sha256(word.encode()).hexdigest(), 16) % EMBED_DIM] += 1.0
+    norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+    return [x / norm for x in vec] if any(vec) else [1.0 / math.sqrt(EMBED_DIM)] * EMBED_DIM

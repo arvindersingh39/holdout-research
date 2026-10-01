@@ -28,6 +28,7 @@ from r2r.store.ledger import CallRecord, Ledger
 log = get_logger("r2r.llm.gateway")
 
 MAX_TRIES = 4
+EMBED_BATCH = 64
 _META = ("created_by", "run_id", "milestone_id")
 
 DATA_PREAMBLE = (
@@ -162,6 +163,44 @@ def run_tool_loop(
     return ToolLoopResult(state.turns, "max_turns", None, state)
 
 
+def embed(texts: list[str], ctx: CallContext) -> list[list[float]]:
+    """Embed `texts` with the configured embeddings model, in batches; one ledger row per batch.
+    Local models (`local/...`) cost $0 but are still ledgered."""
+    model = ctx.settings.models.embeddings.model
+    if model is None:
+        raise LLMCallError("no embeddings model configured in models.yaml")
+    vectors: list[list[float]] = []
+    for i in range(0, len(texts), EMBED_BATCH):
+        vectors += _embed_batch(model, texts[i : i + EMBED_BATCH], ctx)
+    return vectors
+
+
+def _embed_batch(model: str, batch: list[str], ctx: CallContext) -> list[list[float]]:
+    req = LLMRequest(role="embeddings", model=model, messages=[], max_tokens=0)
+    prices = _prices(model, ctx)
+    if prices != (0.0, 0.0):
+        est = sum(estimate_tokens(t, model) for t in batch) * prices[0]
+        _check_spend(est, ctx)
+    retrying = Retrying(
+        stop=stop_after_attempt(MAX_TRIES),
+        wait=wait_random_exponential(multiplier=0.5, max=ctx.retry_wait_max_s),
+        retry=retry_if_exception_type(TransientLLMError),
+        reraise=True,
+    )
+    for attempt in retrying:
+        with attempt:
+            try:
+                resp = ctx.client.embed(model, batch)
+            except LLMCallError as e:
+                _record(ctx, req, ok=False, error=str(e)[:500])
+                raise
+            cost = resp.cost_usd if resp.cost_usd is not None else resp.input_tokens * prices[0]
+            tokens = resp.input_tokens or sum(estimate_tokens(t) for t in batch)
+            _record(ctx, req, resp=LLMResponse(model=model, input_tokens=tokens), cost=cost)
+            return resp.vectors
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 # --- one metered provider call ----------------------------------------------------------
 
 
@@ -232,7 +271,10 @@ def _check_budget(req: LLMRequest, prices: tuple[float, float], ctx: CallContext
     est_in = estimate_tokens(json.dumps(req.messages, default=str), req.model)
     if req.tools:
         est_in += estimate_tokens(json.dumps(req.tools), req.model)
-    worst = est_in * prices[0] + req.max_tokens * prices[1]
+    _check_spend(est_in * prices[0] + req.max_tokens * prices[1], ctx)
+
+
+def _check_spend(worst: float, ctx: CallContext) -> None:
     b = ctx.settings.budgets
     run_left = b.usd_cap_run - ctx.ledger.spent(ctx.run_id)
     if worst > run_left:
@@ -341,6 +383,6 @@ def _describe(e: Exception) -> str:
 
 
 __all__ = [
-    "BudgetExceeded", "CallContext", "ContractViolation", "LLMCallError", "TransientLLMError",
-    "call_structured", "run_tool_loop",
+    "EMBED_BATCH", "BudgetExceeded", "CallContext", "ContractViolation", "LLMCallError",
+    "TransientLLMError", "call_structured", "embed", "run_tool_loop",
 ]  # fmt: skip
