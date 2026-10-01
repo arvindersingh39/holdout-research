@@ -16,7 +16,7 @@ ingest:
   paper_card_input_tokens: 12000   # how much of each paper the retriever reads
 context_pack_tokens: {short_planner: 1500, math_designer: 2500, writer_section: 2000}
 gates:
-  channel: whatsapp                  # cli | whatsapp (D2); tests use cli
+  channel: cli                       # cli | whatsapp (D2); terminal for now (D49)
   approve_first_roadmap: true
   roadmap_changes: material_only     # milestones added/removed/reordered or goal changed
   review_tests: first_milestone      # always | first_milestone | never
