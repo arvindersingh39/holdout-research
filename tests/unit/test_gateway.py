@@ -284,3 +284,30 @@ def test_tool_loop_no_cache_point_for_other_providers(ctx: CallContext, fake: Fa
         isinstance(m["content"], str) or m["role"] == "system" or m["content"] is None
         for m in fake.calls[1].messages
     )
+
+
+# --- reasoning budgets per provider (Q6.1) ---------------------------------------------
+
+
+def test_openrouter_reasoning_budget_format(ctx: CallContext, fake: FakeLLM) -> None:
+    """Through OpenRouter, Anthropic-style `thinking` is ignored for Gemini (probe 2026-10-01);
+    the budget must go in OpenRouter's own `reasoning.max_tokens`."""
+    from samples import optimization_patch, profile_report
+
+    from r2r.contracts import OptimizationPatch
+
+    fake.script("optimizer", optimization_patch())
+    call_structured("optimizer", "optimizer", profile_report(), OptimizationPatch, ctx)
+    req = fake.calls[0]
+    assert req.model.startswith("openrouter/")
+    assert req.thinking is None
+    assert req.extra == {"extra_body": {"reasoning": {"max_tokens": 2000}}}
+    assert req.max_tokens == 4000 + 2000  # thinking never crowds out the answer
+
+
+def test_anthropic_reasoning_budget_unchanged(ctx: CallContext, fake: FakeLLM) -> None:
+    fake.script("long_planner", roadmap())
+    _call(ctx)
+    req = fake.calls[0]
+    assert req.thinking == {"type": "enabled", "budget_tokens": 4000}
+    assert req.extra == {}

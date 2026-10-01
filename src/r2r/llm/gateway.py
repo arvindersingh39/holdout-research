@@ -79,7 +79,7 @@ def call_structured[C: BaseModel](
     """One LLM call whose output is validated into `output_model`."""
     cfg = ctx.settings.models.roles[role]
     model = _resolve_model(role, cfg, model)
-    max_out, thinking = _output_limit(cfg)
+    max_out, thinking, extra = _output_limit(cfg, model)
     schema = _strip_meta(output_model.model_json_schema())
     schema_text = json.dumps(schema, separators=(",", ":"))
     messages = [
@@ -121,6 +121,7 @@ def call_structured[C: BaseModel](
             messages=list(messages),
             max_tokens=max_out,
             thinking=thinking,
+            extra=extra,
             **structured,
         )
         raw = _raw_output(_invoke(req, ctx), native)
@@ -153,7 +154,7 @@ def run_tool_loop(
     `max_turns` is reached. One budget check and one ledger row per turn."""
     cfg = ctx.settings.models.roles[role]
     model = _resolve_model(role, cfg, model)
-    max_out, thinking = _output_limit(cfg)
+    max_out, thinking, extra = _output_limit(cfg, model)
     by_name = {t.name: t for t in tools}
     schemas = [t.schema() for t in tools]
     messages = [_system_message(prompt_id, "", ctx), _user_message(payload)]
@@ -168,6 +169,7 @@ def run_tool_loop(
             tools=schemas,
             tool_choice="auto",
             thinking=thinking,
+            extra=extra,
         )
         resp = _invoke(req, ctx)
         state.turns += 1
@@ -367,14 +369,16 @@ def _resolve_model(role: str, cfg: RoleConfig, model: str | None) -> str:
     return model
 
 
-def _output_limit(cfg: RoleConfig) -> tuple[int, dict[str, Any] | None]:
-    """Anthropic requires max_tokens > thinking budget, so thinking is added on top."""
-    if cfg.thinking_budget:
-        return cfg.max_tokens + cfg.thinking_budget, {
-            "type": "enabled",
-            "budget_tokens": cfg.thinking_budget,
-        }
-    return cfg.max_tokens, None
+def _output_limit(cfg: RoleConfig, model: str) -> tuple[int, dict[str, Any] | None, dict[str, Any]]:
+    """(max_tokens, thinking, extra request args). The reasoning budget is added on top of the
+    answer's limit so thinking never crowds out the answer. Anthropic takes `thinking`; through
+    OpenRouter (e.g. Gemini) only `reasoning.max_tokens` is honoured (probe 2026-10-01)."""
+    if not cfg.thinking_budget:
+        return cfg.max_tokens, None, {}
+    total = cfg.max_tokens + cfg.thinking_budget
+    if model.startswith("openrouter/"):
+        return total, None, {"extra_body": {"reasoning": {"max_tokens": cfg.thinking_budget}}}
+    return total, {"type": "enabled", "budget_tokens": cfg.thinking_budget}, {}
 
 
 def _system_message(prompt_id: str, suffix: str, ctx: CallContext) -> dict[str, Any]:
