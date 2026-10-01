@@ -218,6 +218,44 @@ def show(
     console.print(Markdown(render(value)))
 
 
+@app.command()
+def costs(run_id: str, runs_base: RunsBase = None) -> None:
+    """Spend by role, model and milestone, with cache-read share."""
+    from rich.table import Table
+
+    deps = _deps(run_id, runs_base)
+    led = deps.ledger
+
+    def table(title: str, groups: dict) -> Table:
+        tb = Table(title=title)
+        for col in ("", "calls", "input", "output", "cache read", "cost $"):
+            tb.add_column(col, justify="left" if col == "" else "right")
+        for name, s in groups.items():
+            share = f"{s.cache_read_tokens / s.input_tokens:.0%}" if s.input_tokens else "-"
+            tb.add_row(
+                name,
+                str(s.calls),
+                f"{s.input_tokens:,}",
+                f"{s.output_tokens:,}",
+                share,
+                f"{s.cost_usd:.4f}",
+            )
+        return tb
+
+    console.print(table(f"Run {run_id}: by role", led.by_role(run_id)))
+    console.print(table("By model", led.by_model(run_id)))
+    ms = Table(title="By milestone")
+    ms.add_column("milestone")
+    ms.add_column("cost $", justify="right")
+    for m, c in led.by_milestone(run_id).items():
+        ms.add_row(m or "run-level", f"{c:.4f}")
+    console.print(ms)
+    console.print(
+        f"[bold]Total ${led.spent(run_id):.4f}[/]  ·  compare: console.anthropic.com "
+        "(Usage) and openrouter.ai/activity"
+    )
+
+
 # --- sandbox ----------------------------------------------------------------------------------
 
 sandbox_app = typer.Typer(help="Build and check the Docker sandbox.", no_args_is_help=True)

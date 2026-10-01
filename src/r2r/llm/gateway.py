@@ -259,6 +259,12 @@ def _with_cache_point(
 
 
 def _invoke(req: LLMRequest, ctx: CallContext) -> LLMResponse:
+    req.metadata = {
+        "generation_name": req.role,
+        "trace_name": f"{ctx.run_id}/{ctx.milestone_id or 'run'}/{req.role}",
+        "session_id": ctx.run_id,
+        "tags": [f"run:{ctx.run_id}", f"milestone:{ctx.milestone_id or 'run'}", f"role:{req.role}"],
+    }
     prices = _prices(req.model, ctx)
     _check_budget(req, prices, ctx)
     retrying = Retrying(

@@ -60,6 +60,7 @@ class LLMRequest:
     thinking: dict[str, Any] | None = None
     timeout_s: float = 300.0
     extra: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)  # trace tags (Langfuse, D47)
 
 
 class LLMClient(Protocol):
@@ -88,6 +89,7 @@ class LiteLLMClient:
     def __init__(self, secrets: Secrets) -> None:
         self._secrets = secrets
         self._local_embedder: Any = None
+        self.tracing = _enable_langfuse(secrets)
 
     def _api_key(self, model: str) -> str | None:
         field_name = _KEY_FIELD.get(model.split("/", 1)[0])
@@ -105,6 +107,8 @@ class LiteLLMClient:
             "api_key": self._api_key(req.model),
             **req.extra,
         }
+        if self.tracing and req.metadata:
+            kwargs["metadata"] = req.metadata
         for name in ("response_format", "tools", "tool_choice", "thinking"):
             if (value := getattr(req, name)) is not None:
                 kwargs[name] = value
@@ -204,6 +208,25 @@ class LiteLLMClient:
         if not inp or not out:  # a 0 price is LiteLLM's "unknown", not "free"
             return None
         return float(inp), float(out)
+
+
+def _enable_langfuse(secrets: Secrets) -> bool:
+    """D47: trace through LiteLLM's OpenTelemetry Langfuse callback, only when all three keys
+    exist. Keys go into this host process's environment only; sandboxes never inherit it."""
+    pk, sk, host = secrets.langfuse_public_key, secrets.langfuse_secret_key, secrets.langfuse_host
+    if not (pk and sk and host):
+        return False
+    import os
+
+    import litellm
+
+    os.environ["LANGFUSE_PUBLIC_KEY"] = pk.get_secret_value()
+    os.environ["LANGFUSE_SECRET_KEY"] = sk.get_secret_value()
+    os.environ["LANGFUSE_HOST"] = host
+    os.environ["LANGFUSE_OTEL_HOST"] = host
+    if "langfuse_otel" not in litellm.callbacks:
+        litellm.callbacks = [*litellm.callbacks, "langfuse_otel"]
+    return True
 
 
 def _short(e: Exception) -> str:
