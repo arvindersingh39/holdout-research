@@ -206,5 +206,62 @@ def show(
     console.print(Markdown(render(value)))
 
 
+# --- sandbox ----------------------------------------------------------------------------------
+
+sandbox_app = typer.Typer(help="Build and check the Docker sandbox.", no_args_is_help=True)
+app.add_typer(sandbox_app, name="sandbox")
+
+
+@sandbox_app.command("build")
+def sandbox_build() -> None:
+    """Build the sandbox image (only if sandbox/ changed). The first build takes a few minutes."""
+    from r2r.harness.sandbox import ensure_image
+
+    with console.status("Building the sandbox image..."):
+        tag = ensure_image()
+    console.print(f"Sandbox image ready: [bold]{tag}[/]")
+
+
+@sandbox_app.command("check")
+def sandbox_check() -> None:
+    """Smoke-test the sandbox: scientific stack imports, network off, frozen dirs read-only."""
+    import tempfile
+
+    from r2r.harness.sandbox import DockerBackend
+    from r2r.harness.workspace import Workspace
+    from r2r.store.runs import run_paths
+
+    root = project_root()
+    limits = load_settings(root / "config", root / ".env").budgets.sandbox
+    # Docker Desktop may still hold the read-only mounts for a moment after a container exits,
+    # so cleanup of this throwaway workspace must not fail the check.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        ws = Workspace.create(run_paths("sandbox-check", base=Path(tmp), create=True))
+        box = DockerBackend(ws, limits)
+        checks = {
+            "numpy, scipy, numba, sympy import": (
+                ["python", "-c", "import numpy, scipy, numba, sympy"],
+                True,
+            ),
+            "network is off": (
+                ["python", "-c", "import socket; socket.create_connection(('1.1.1.1', 53), 3)"],
+                False,
+            ),
+            "frozen tests are read-only": (
+                ["python", "-c", "open('tests/frozen/x.py', 'w')"],
+                False,
+            ),
+            "runs as non-root": (["sh", "-c", "test $(id -u) -ne 0"], True),
+        }
+        ok = True
+        for name, (cmd, should_succeed) in checks.items():
+            passed = (box.run(cmd, 60).exit_code == 0) == should_succeed
+            ok &= passed
+            console.print(f"{'[green]✓[/]' if passed else '[red]✗[/]'} {name}")
+    console.print(f"Sandbox {box.image}: " + ("[green]OK[/]" if ok else "[red]FAILED[/]"))
+    if not ok:
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
