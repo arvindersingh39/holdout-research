@@ -16,3 +16,5 @@ build/
 .venv.nosync/
 *.nosync
 files.zip
+runs
+runs.nosync/
