@@ -35,6 +35,8 @@ def models_to_roles(settings: Settings) -> dict[str, list[str]]:
 
 
 def price_entry(model: str) -> str:
+    if model.startswith("local/"):
+        return "free (runs locally)"
     try:
         info = litellm.get_model_info(model)
     except Exception:
@@ -46,6 +48,8 @@ def price_entry(model: str) -> str:
 
 
 def ping(model: str, settings: Settings) -> tuple[bool, str]:
+    if model.startswith("local/"):
+        return True, "skipped: local model, loaded by Chroma in Phase 2"
     key_field = KEY_FOR_PROVIDER.get(model.split("/", 1)[0])
     key = getattr(settings.secrets, key_field) if key_field else None
     if key_field and key is None:
