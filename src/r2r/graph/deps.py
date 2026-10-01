@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from r2r.harness.sandbox import DockerBackend, SandboxBackend
+from r2r.harness.workspace import Workspace
 from r2r.llm.client import LLMClient
 from r2r.llm.gateway import CallContext
 from r2r.retrieval.vectors import VectorIndex
@@ -26,6 +29,8 @@ class RunDeps:
     proposal_dir: Path
     prompts_dir: Path
     retry_wait_max_s: float = 20.0
+    # Docker in production; the framework tests inject an unisolated backend (D29).
+    sandbox_factory: Callable[[Workspace], SandboxBackend] | None = None
     ledger: Ledger = field(init=False)
     blobs: BlobStore = field(init=False)
     index: VectorIndex = field(init=False)
@@ -34,6 +39,15 @@ class RunDeps:
         self.ledger = Ledger(self.paths.ledger)
         self.blobs = BlobStore(self.paths.blobs)
         self.index = VectorIndex(self.paths.vectors, self.ctx())
+
+    def workspace(self) -> Workspace:
+        return Workspace.create(self.paths)
+
+    def sandbox(self) -> SandboxBackend:
+        ws = self.workspace()
+        if self.sandbox_factory is not None:
+            return self.sandbox_factory(ws)
+        return DockerBackend(ws, self.settings.budgets.sandbox)
 
     def ctx(self, milestone_id: str | None = None) -> CallContext:
         return CallContext(
@@ -56,6 +70,7 @@ class RunDeps:
         runs_base: Path,
         prompts_dir: Path,
         retry_wait_max_s: float = 20.0,
+        sandbox_factory: Callable[[Workspace], SandboxBackend] | None = None,
     ) -> RunDeps:
         paths = run_paths(run_id, base=runs_base, create=True)
         meta = {
@@ -65,7 +80,14 @@ class RunDeps:
         }
         (paths.root / "run.json").write_text(json.dumps(meta, indent=2))
         return cls(
-            run_id, settings, client, paths, Path(proposal_dir), prompts_dir, retry_wait_max_s
+            run_id,
+            settings,
+            client,
+            paths,
+            Path(proposal_dir),
+            prompts_dir,
+            retry_wait_max_s,
+            sandbox_factory,
         )
 
     @classmethod
@@ -77,6 +99,7 @@ class RunDeps:
         runs_base: Path,
         prompts_dir: Path,
         retry_wait_max_s: float = 20.0,
+        sandbox_factory: Callable[[Workspace], SandboxBackend] | None = None,
     ) -> RunDeps:
         paths = run_paths(run_id, base=runs_base)
         meta_file = paths.root / "run.json"
@@ -91,4 +114,5 @@ class RunDeps:
             Path(meta["proposal_dir"]),
             prompts_dir,
             retry_wait_max_s,
+            sandbox_factory,
         )

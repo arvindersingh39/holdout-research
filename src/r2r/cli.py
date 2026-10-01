@@ -28,6 +28,11 @@ def make_client(settings: Settings) -> LLMClient:
     return LiteLLMClient(settings.secrets)
 
 
+def make_sandbox_factory():
+    """None means the Docker sandbox. The framework's own tests replace this (D29)."""
+    return None
+
+
 @app.command()
 def version() -> None:
     """Show the r2r version."""
@@ -105,7 +110,14 @@ def _deps(run_id: str, runs_base: Path | None, proposal: Path | None = None):
             run_id, proposal, settings, make_client(settings), base, root / "prompts"
         )
     try:
-        return RunDeps.load(run_id, settings, make_client(settings), base, root / "prompts")
+        return RunDeps.load(
+            run_id,
+            settings,
+            make_client(settings),
+            base,
+            root / "prompts",
+            sandbox_factory=make_sandbox_factory(),
+        )
     except FileNotFoundError as e:
         console.print(f"[red]{e}[/]")
         raise typer.Exit(2) from None

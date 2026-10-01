@@ -29,9 +29,15 @@ class PipelineState(TypedDict, total=False):
     spec: MilestoneSpec | None
     verdict: CoordinatorVerdict | None
     revise_rounds: int
-    math_spec: MathSpec | None  # Phase 5
-    test_result: TestResult | None  # Phase 5
-    coder_sessions: int  # Phase 5
+    math_spec: MathSpec | None
+    design_attempts: int  # failed designs for the current milestone
+    design_feedback: str | None  # why the last design was rejected (red-green or owner)
+    redgreen_ok: bool
+    frozen_commit: str | None  # workspace commit holding this milestone's frozen tests
+    test_result: TestResult | None
+    coder_sessions: int
+    tamper: str | None  # FrozenTamper message waiting at the tamper gate
+    tamper_attempts: int  # blocked writes to frozen files, over the whole run
     opt_outcomes: list[OptimizationOutcome]  # Phase 6
     digest: ResultDigest | None
     human_decision: HumanDecision | None

@@ -8,13 +8,19 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "unit"))
 from samples import coordinator_verdict, milestone_spec, research_brief, roadmap
 
 from r2r.contracts import (
+    BenchSpec,
     CoordinatorVerdict,
+    FileSpec,
     HumanDecision,
     Issue,
+    MathDesign,
+    MathSpec,
 )
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest
-from r2r.llm.fake import FakeLLM
+from r2r.harness.sandbox import LocalProcessBackend
+from r2r.llm.client import ToolCall
+from r2r.llm.fake import FakeLLM, tool_call
 from r2r.settings import load_settings
 
 REPO = Path(__file__).resolve().parents[2]
@@ -60,7 +66,13 @@ def decide(action: str, **kw) -> HumanDecision:
     return HumanDecision(created_by="human", run_id="g", action=action, **kw)
 
 
-def make_deps(tmp_path: Path, fake: FakeLLM, run_id: str = "g", create: bool = True) -> RunDeps:
+def make_deps(
+    tmp_path: Path,
+    fake: FakeLLM,
+    run_id: str = "g",
+    create: bool = True,
+    sandbox_factory=LocalProcessBackend,
+) -> RunDeps:
     settings = load_settings(REPO / "config", env_file=None)
     if create:
         return RunDeps.create(
@@ -71,7 +83,78 @@ def make_deps(tmp_path: Path, fake: FakeLLM, run_id: str = "g", create: bool = T
             runs_base=tmp_path,
             prompts_dir=REPO / "prompts",
             retry_wait_max_s=0,
+            sandbox_factory=sandbox_factory,
         )
     return RunDeps.load(
-        run_id, settings, fake, runs_base=tmp_path, prompts_dir=REPO / "prompts", retry_wait_max_s=0
+        run_id,
+        settings,
+        fake,
+        runs_base=tmp_path,
+        prompts_dir=REPO / "prompts",
+        retry_wait_max_s=0,
+        sandbox_factory=sandbox_factory,
     )
+
+
+# --- #4 designs and #5 coder scripts for a tiny task: square(x), one package per milestone ------
+
+STUB = "def square(x: float) -> float:\n    raise NotImplementedError\n"
+IMPL = "def square(x: float) -> float:\n    return x * x\n"
+GOOD_TESTS = """\
+from {pkg}.core import square
+
+
+def test_AC1__square_of_three():
+    assert square(3) == 9
+
+
+def test_AC1__square_of_negative():
+    assert square(-2) == 4
+"""
+VACUOUS_TESTS = "def test_AC1__always_true():\n    assert True\n"
+BROKEN_TESTS = (
+    "from no_such_package import square\n\n\ndef test_AC1__x():\n    assert square(3) == 9\n"
+)
+
+
+def design(n: int, tests: str = GOOD_TESTS) -> MathDesign:
+    pkg = f"sq{n}"
+    meta = {"created_by": "math_designer", "run_id": "g", "milestone_id": f"M{n}"}
+    test_file = f"tests/frozen/test_m{n}_square.py"
+    check_file = f"checks/check_m{n}_square.py"
+    spec = MathSpec(
+        **meta,
+        formulation="f(x) = x^2",
+        algorithm="multiply",
+        signatures=["square(x: float) -> float"],
+        test_files=[test_file],
+        check_files=[check_file],
+        bench=BenchSpec(entrypoint=f"bench/bench_m{n}.py", problem_size="1 call"),
+    )
+    files = [
+        FileSpec(path=test_file, purpose="test", content=tests.format(pkg=pkg)),
+        FileSpec(path=check_file, purpose="check", content="assert (2 + 3) ** 2 == 25\n"),
+        FileSpec(path=f"src/{pkg}/__init__.py", purpose="stub", content=""),
+        FileSpec(path=f"src/{pkg}/core.py", purpose="stub", content=STUB),
+        FileSpec(
+            path=f"bench/bench_m{n}.py",
+            purpose="bench",
+            content=f"from {pkg}.core import square\n\n\ndef main():\n    square(2.0)\n",
+        ),
+    ]
+    return MathDesign(**meta, spec=spec, files=files)
+
+
+def coder_pass(n: int) -> list[list[ToolCall]]:
+    """One coder session that implements square(x) and runs the tests."""
+    return [
+        [tool_call("create_file", path=f"src/sq{n}/core.py", content=IMPL)],
+        [tool_call("run_tests")],
+    ]
+
+
+def script_milestone(fake: FakeLLM, n: int, verdict: CoordinatorVerdict = PASS) -> None:
+    fake.script("short_planner", SPEC)
+    fake.script("coordinator", verdict)
+    fake.script("math_designer", design(n))
+    fake.script("coder", *coder_pass(n))

@@ -71,3 +71,19 @@ def verify(ws: Workspace) -> None:
     removed = sorted(expected.keys() - actual.keys())
     if changed or added or removed:
         raise FrozenTamper(changed, added, removed)
+
+
+def restore(ws: Workspace, git, commit: str) -> None:
+    """Put tests/frozen/ and checks/ back exactly as committed at `commit` (after a tamper gate)."""
+    expected: dict[str, str] = json.loads(ws.frozen_manifest.read_text())["files"]
+    for rel in manifest(ws).keys() - expected.keys():
+        (ws.root / rel).unlink()
+    for rel in expected:
+        p = ws.root / rel
+        if p.exists():
+            p.chmod(0o644)
+    git.run("checkout", commit, "--", *FROZEN_DIRS)
+    for rel in expected:
+        p = ws.root / rel
+        p.chmod(p.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+    verify(ws)

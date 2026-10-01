@@ -6,7 +6,15 @@ from functools import singledispatch
 
 from pydantic import BaseModel
 
-from r2r.contracts import CoordinatorVerdict, MilestoneSpec, ResearchBrief, ResultDigest, Roadmap
+from r2r.contracts import (
+    CoordinatorVerdict,
+    MathSpec,
+    MilestoneSpec,
+    ResearchBrief,
+    ResultDigest,
+    Roadmap,
+    TestResult,
+)
 
 
 def _bullets(items: list[str]) -> str:
@@ -90,3 +98,53 @@ def _(d: ResultDigest) -> str:
             f"Cost ${d.cost_usd:.4f} · {d.tokens:,} tokens · {len(d.artifacts)} artifacts",
         ]
     )
+
+
+@render.register
+def _(m: MathSpec) -> str:
+    tol = "\n".join(f"- {k}: {v:g}" for k, v in m.tolerances.items()) or "- (none)"
+    bench = f"`{m.bench.entrypoint}` · {m.bench.problem_size}" if m.bench else "(none)"
+    return "\n\n".join(
+        [
+            f"## Math spec · {m.milestone_id}",
+            f"**Formulation**\n\n$$ {m.formulation} $$",
+            f"**Algorithm.** {m.algorithm}",
+            "**Signatures**\n" + "\n".join(f"- `{s}`" for s in m.signatures),
+            f"**Tolerances**\n{tol}",
+            f"**Files** tests: {_inline(m.test_files)} · checks: {_inline(m.check_files)}"
+            f" · bench: {bench}",
+        ]
+    )
+
+
+@render.register
+def _(r: TestResult) -> str:
+    head = f"## Tests · {r.milestone_id}: **{'PASS' if r.passed else 'FAIL'}**"
+    lines = [head, f"{r.n_passed} passed · {r.n_failed} failed · frozen ok: {r.frozen_ok}"]
+    for f in r.failures:
+        crit = f" ({f.criterion_id})" if f.criterion_id else ""
+        lines.append(f"- `{f.test_id}`{crit}: {f.message}")
+    return "\n\n".join(lines)
+
+
+FILE_CHARS = 6000
+TOTAL_CHARS = 30_000
+
+
+def render_files(root, paths: list[str]) -> str:
+    """Test and check files for the tests gate, each in a code block, truncated."""
+    parts, total = [], 0
+    for rel in paths:
+        try:
+            text = (root / rel).read_text()
+        except OSError:
+            text = "(missing)"
+        if len(text) > FILE_CHARS:
+            text = text[:FILE_CHARS] + f"\n# ... {len(text) - FILE_CHARS} more characters"
+        block = f"**{rel}**\n\n```python\n{text}\n```"
+        if total + len(block) > TOTAL_CHARS:
+            parts.append(f"... {len(paths) - len(parts)} more file(s) not shown")
+            break
+        parts.append(block)
+        total += len(block)
+    return "\n\n".join(parts)

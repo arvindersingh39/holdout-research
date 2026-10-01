@@ -9,23 +9,29 @@ from typing import Any
 
 from langgraph.types import interrupt
 
+from r2r.agents.coder import CoderTools, run_coder_session
 from r2r.agents.coordinator import run_coordinator
 from r2r.agents.long_planner import run_long_planner
+from r2r.agents.math_designer import DesignError, run_math_designer, write_design
 from r2r.agents.retriever import run_retriever
 from r2r.agents.short_planner import run_short_planner
 from r2r.contracts import (
-    CriterionResult,
     HumanDecision,
     Milestone,
     MilestoneSpec,
-    ResultDigest,
     Roadmap,
 )
+from r2r.digest.builder import build_digest
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest, gate_request
-from r2r.graph.render import render
+from r2r.graph.render import render, render_files
 from r2r.graph.routing import is_material_change, mark_done, next_milestone
 from r2r.graph.state import PipelineState
+from r2r.harness.checks import run_checks
+from r2r.harness.frozen import FrozenTamper, freeze, restore
+from r2r.harness.gitops import Git
+from r2r.harness.redgreen import assess
+from r2r.harness.tests import run_tests, run_tests_detailed
 from r2r.ingest.proposal import ingest_proposal
 from r2r.retrieval.context_pack import build_pack
 
@@ -110,24 +116,123 @@ def coordinate(state: PipelineState, deps: RunDeps) -> Update:
     return {"verdict": verdict, "revise_rounds": rounds}
 
 
-def build_stub(state: PipelineState, deps: RunDeps) -> Update:
-    """Stands in for math designer, coder and optimizer until Phases 5 and 6."""
+def _existing_files(deps: RunDeps) -> list[str]:
+    root = deps.workspace().root
+    return sorted(
+        p.relative_to(root).as_posix()
+        for d in ("src", "bench", "tests/frozen", "checks")
+        for p in (root / d).rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts
+    )
+
+
+def design(state: PipelineState, deps: RunDeps) -> Update:
+    """#4 writes tests, checks, stubs and bench; the harness proves red before green (D32)."""
     m = _milestone(state)
-    rows = [r for r in deps.ledger.rows(deps.run_id) if r.milestone_id == m.id]
-    digest = ResultDigest(
-        created_by="digest",
+    spec = state["spec"]
+    ws, box = deps.workspace(), deps.sandbox()
+    Git(ws).checkout("main")
+    query = f"{m.title}. " + " ".join(c.text for c in m.acceptance_criteria)
+    pack = build_pack(
+        query,
+        deps.settings.budgets.context_pack_tokens.math_designer,
+        CONTEXT_K,
+        deps.index,
+        deps.blobs,
+    )
+    prev = state.get("math_spec")
+    previous = prev if prev is not None and prev.milestone_id == m.id else None
+    failed = state.get("design_attempts", 0)
+    out = run_math_designer(
+        spec, m, pack, _existing_files(deps), state.get("design_feedback"), deps.ctx(m.id)
+    )
+    try:
+        write_design(ws, out, previous)
+    except DesignError as e:
+        return {
+            "redgreen_ok": False,
+            "design_attempts": failed + 1,
+            "design_feedback": f"The design could not be written: {e}",
+        }
+    timeout = deps.settings.budgets.sandbox.test_timeout_s
+    checks = run_checks(ws, box, timeout)
+    result, cases = run_tests_detailed(
+        ws, box, run_id=deps.run_id, milestone_id=m.id, timeout_s=timeout, require_frozen=False
+    )
+    rg = assess([c.id for c in spec.acceptance_criteria], cases, checks, out.spec.test_files)
+    return {
+        "math_spec": out.spec,
+        "redgreen_ok": rg.ok,
+        "test_result": result,
+        "design_attempts": failed if rg.ok else failed + 1,
+        "design_feedback": None if rg.ok else rg.describe(),
+    }
+
+
+def freeze_tests(state: PipelineState, deps: RunDeps) -> Update:
+    m = _milestone(state)
+    ws = deps.workspace()
+    git = Git(ws)
+    freeze(ws)
+    commit = git.commit(f"{m.id}: frozen tests, checks, stubs and bench")
+    git.branch(f"wip/{m.id}", commit)
+    return {"frozen_commit": commit, "coder_sessions": 0, "tamper": None, "design_feedback": None}
+
+
+def code(state: PipelineState, deps: RunDeps) -> Update:
+    """One coder session; the harness reruns the tests afterwards (never trusting the session)."""
+    m = _milestone(state)
+    b = deps.settings.budgets
+    cfg = deps.settings.models.roles["coder"]
+    n = state.get("coder_sessions", 0)
+    model = cfg.escalate_to if cfg.escalate_to and n >= b.coder_escalate_after else None
+    ws, box = deps.workspace(), deps.sandbox()
+    tools = CoderTools(
+        ws, box, run_id=deps.run_id, milestone_id=m.id, timeout_s=b.sandbox.test_timeout_s
+    )
+    run_coder_session(
+        state["spec"],
+        state["math_spec"],
+        state.get("test_result"),
+        tools,
+        deps.ctx(m.id),
+        model=model,
+    )
+    attempts = state.get("tamper_attempts", 0) + len(tools.tamper_attempts)
+    update: Update = {"coder_sessions": n + 1, "tamper_attempts": attempts}
+    try:
+        final = run_tests(
+            ws, box, run_id=deps.run_id, milestone_id=m.id, timeout_s=b.sandbox.test_timeout_s
+        )
+    except FrozenTamper as e:
+        return update | {"tamper": str(e)}
+    git = Git(ws)
+    git.commit(f"{m.id}: coder session {n + 1} ({'pass' if final.passed else 'fail'})")
+    if final.passed:
+        git.checkout("main")
+        git.run("merge", "-q", "--ff-only", f"wip/{m.id}")
+    return update | {"test_result": final, "tamper": None}
+
+
+def digest(state: PipelineState, deps: RunDeps) -> Update:
+    m = _milestone(state)
+    ws, box = deps.workspace(), deps.sandbox()
+    result, cases = run_tests_detailed(
+        ws,
+        box,
         run_id=deps.run_id,
         milestone_id=m.id,
-        status="met",
-        criteria=[
-            CriterionResult(id=c.id, passed=True, evidence="stub: no code built yet")
-            for c in state["spec"].acceptance_criteria
-        ],
-        deviations="Build stub: tests and code are not generated until Phases 5-6.",
-        cost_usd=deps.ledger.spent(deps.run_id, m.id),
-        tokens=sum(r.input_tokens + r.output_tokens for r in rows),
+        timeout_s=deps.settings.budgets.sandbox.test_timeout_s,
     )
-    return {"digest": digest}
+    d = build_digest(
+        state["spec"],
+        cases,
+        deps.ledger,
+        run_id=deps.run_id,
+        milestone_id=m.id,
+        test_files=state["math_spec"].test_files,
+    )
+    return {"digest": d, "test_result": result}
 
 
 def finish(state: PipelineState, deps: RunDeps) -> Update:
@@ -193,7 +298,19 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
     update: Update = {"human_decision": d}
     if d.action == "stop":
         return update | {"status": "stopped"}
-    reset = {"spec": None, "verdict": None, "revise_rounds": 0, "human_note": d.note or None}
+    reset = {
+        "spec": None,
+        "verdict": None,
+        "revise_rounds": 0,
+        "human_note": d.note or None,
+        "math_spec": None,
+        "design_attempts": 0,
+        "design_feedback": None,
+        "frozen_commit": None,
+        "test_result": None,
+        "coder_sessions": 0,
+        "tamper": None,
+    }
     if d.action in ("approve", "edit"):
         update |= reset | {
             "roadmap": mark_done(state["roadmap"], digest.milestone_id),
@@ -202,3 +319,73 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
     else:  # redirect: milestone stays open; the planner decides with the note
         update |= reset
     return update
+
+
+def tests_gate(state: PipelineState, deps: RunDeps) -> Update:
+    ms = state["math_spec"]
+    files = render_files(deps.workspace().root, [*ms.test_files, *ms.check_files])
+    md = render(ms) + "\n\nAll criteria fail on the stubs with NotImplementedError.\n\n" + files
+    d = _ask(
+        GateRequest(
+            gate="tests", title=f"Review {ms.milestone_id}'s tests before coding", markdown=md
+        )
+    )
+    if d.action == "stop":
+        return {"human_decision": d, "status": "stopped"}
+    if d.action == "redirect":
+        return {
+            "human_decision": d,
+            "design_attempts": 0,
+            "design_feedback": f"The owner reviewed the tests and asks: {d.note}",
+        }
+    return {"human_decision": d}
+
+
+def design_gate(state: PipelineState, deps: RunDeps) -> Update:
+    ms = state.get("math_spec")
+    md = f"## The math designer failed twice\n\n{state.get('design_feedback') or ''}"
+    if ms is not None:
+        md += "\n\n" + render(ms)
+    d = _ask(
+        GateRequest(gate="design", title="Tests are not red for the right reason", markdown=md)
+    )
+    update: Update = {"human_decision": d}
+    if d.action == "stop":
+        update["status"] = "stopped"
+    elif d.action == "redirect":
+        update["human_note"] = d.note
+    return update
+
+
+def coder_gate(state: PipelineState, deps: RunDeps) -> Update:
+    r = state["test_result"]
+    md = f"{state.get('coder_sessions', 0)} coder sessions used.\n\n" + render(r)
+    d = _ask(GateRequest(gate="coder", title=f"{r.milestone_id}: tests still failing", markdown=md))
+    update: Update = {"human_decision": d}
+    if d.action == "stop":
+        update["status"] = "stopped"
+    elif d.action == "redirect":
+        update["human_note"] = d.note
+    else:  # accept the partial result: keep the coder's work on main
+        m = _milestone(state)
+        git = Git(deps.workspace())
+        git.checkout("main")
+        git.run("merge", "-q", "--ff-only", f"wip/{m.id}")
+    return update
+
+
+def tamper_gate(state: PipelineState, deps: RunDeps) -> Update:
+    md = (
+        f"## Frozen tests were modified\n\n{state.get('tamper')}\n\n"
+        f"Blocked write attempts so far: {state.get('tamper_attempts', 0)}.\n\n"
+        "Approve restores the frozen files from git and lets the coder continue."
+    )
+    d = _ask(GateRequest(gate="tamper", title="Tamper detected", markdown=md))
+    update: Update = {"human_decision": d}
+    if d.action == "stop":
+        return update | {"status": "stopped"}
+    if d.action == "redirect":
+        return update | {"human_note": d.note}
+    ws = deps.workspace()
+    restore(ws, Git(ws), state["frozen_commit"])
+    return update | {"tamper": None}

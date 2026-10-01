@@ -277,3 +277,16 @@ def test_planted_hook_never_runs(ws: Workspace) -> None:
     (hook_dir / "pre-commit").chmod(0o755)
     git.commit("with a planted hook")
     assert not marker.exists()
+
+
+def test_tamper_during_run_detected(ws: Workspace, box: LocalProcessBackend) -> None:
+    """Code under test rewriting a frozen test while pytest runs is caught by the post-run check."""
+    freeze(ws)
+    (ws.root / "src/slowpkg/__init__.py").write_text(
+        "import os, stat\n"
+        "p = 'tests/frozen/test_core.py'\n"
+        "os.chmod(p, stat.S_IRUSR | stat.S_IWUSR)\n"
+        "open(p, 'a').write('\\n# rewritten while running\\n')\n"
+    )
+    with pytest.raises(FrozenTamper):
+        run_tests(ws, box, timeout_s=60, **META)

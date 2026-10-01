@@ -149,6 +149,8 @@ class LocalProcessBackend:
             "PATH": os.environ.get("PATH", ""),
             "PYTHONDONTWRITEBYTECODE": "1",
             "HOME": str(self.ws.root / ".r2r"),
+            # the host venv has many pytest plugins; workspace tests need none of them
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         }
         start = time.monotonic()
         try:

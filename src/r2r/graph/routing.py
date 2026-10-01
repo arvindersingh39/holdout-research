@@ -7,7 +7,9 @@ from typing import Literal
 from r2r.contracts import CoordinatorVerdict, HumanDecision, Milestone, Roadmap
 
 END = "__end__"
-GateKind = Literal["roadmap", "escalation", "result", "publication"]
+GateKind = Literal[
+    "roadmap", "escalation", "tests", "design", "coder", "tamper", "result", "publication"
+]
 _FINISHED = {"done", "skipped"}
 
 
@@ -57,7 +59,7 @@ def is_material_change(old: Roadmap | None, new: Roadmap) -> bool:
 def route_after_coordinator(verdict: CoordinatorVerdict, rounds: int, max_rounds: int) -> str:
     """`rounds` counts revise verdicts so far for this milestone, including this one."""
     if verdict.verdict == "pass":
-        return "build"
+        return "design"
     if rounds > max_rounds:
         return "escalation_gate"
     if any(i.target == "roadmap" for i in verdict.issues):
@@ -69,10 +71,37 @@ def route_after_gate(gate: GateKind, decision: HumanDecision) -> str:
     if decision.action == "stop":
         return END
     if decision.action == "redirect":
-        return "long_plan"
+        return "design" if gate == "tests" else "long_plan"
     return {
         "roadmap": "short_plan",
-        "escalation": "build",
+        "escalation": "design",
+        "tests": "freeze",
+        "design": "freeze",
+        "coder": "digest",
+        "tamper": "code",
         "result": "long_plan",
         "publication": END,
     }[gate]
+
+
+def needs_test_review(review_tests: str, roadmap: Roadmap) -> bool:
+    if review_tests == "always":
+        return True
+    if review_tests == "never":
+        return False
+    return not any(m.status == "done" for m in roadmap.milestones)  # first_milestone
+
+
+def route_after_design(redgreen_ok: bool, failed_attempts: int, review: bool) -> str:
+    """One automatic redesign; a second failure goes to the human design gate."""
+    if redgreen_ok:
+        return "tests_gate" if review else "freeze"
+    return "design" if failed_attempts < 2 else "design_gate"
+
+
+def route_after_code(tampered: bool, passed: bool, sessions: int, max_sessions: int) -> str:
+    if tampered:
+        return "tamper_gate"
+    if passed:
+        return "digest"
+    return "code" if sessions < max_sessions else "coder_gate"

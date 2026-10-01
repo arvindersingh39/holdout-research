@@ -158,7 +158,9 @@ def run_tests_detailed(
     timeout_s: float,
     require_frozen: bool = True,
 ) -> tuple[TestResult, list[CaseOutcome]]:
-    """Like `run_tests`, plus every test case's outcome (for red-green checks and digests)."""
+    """Like `run_tests`, plus every test case's outcome (for red-green checks and digests).
+
+    The frozen hash is verified before and after the run (raises FrozenTamper)."""
     frozen_ok = False
     if require_frozen:
         verify(ws)
@@ -182,6 +184,8 @@ def run_tests_detailed(
         ],
         timeout_s,
     )
+    if require_frozen:
+        verify(ws)  # again after the run: code under test must not rewrite tests while running
     meta = {"run_id": run_id, "milestone_id": milestone_id}
     if res.timed_out:
         f = _failure("pytest", f"test run timed out after {timeout_s:.0f} s", res.stdout)
