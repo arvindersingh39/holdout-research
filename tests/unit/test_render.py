@@ -37,3 +37,18 @@ def test_render_digest() -> None:
 def test_render_is_compact() -> None:
     for c in (research_brief(), roadmap(), milestone_spec(), coordinator_verdict()):
         assert len(render(c)) < 4000
+
+
+def test_roadmap_renders_as_nested_list_in_rich() -> None:
+    import io
+
+    from rich.console import Console
+    from rich.markdown import Markdown
+
+    out = io.StringIO()
+    Console(file=out, width=100).print(Markdown(render(roadmap())))
+    lines = [ln.rstrip() for ln in out.getvalue().splitlines()]
+    m1 = next(i for i, ln in enumerate(lines) if "M1 · milestone 1" in ln)
+    m2 = next(i for i, ln in enumerate(lines) if "M2 · milestone 2" in ln)
+    assert m2 > m1  # milestones on separate lines, not one paragraph
+    assert any("AC1: criterion 1" in ln for ln in lines[m1 + 1 : m2])

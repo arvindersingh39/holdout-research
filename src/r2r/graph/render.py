@@ -42,10 +42,10 @@ def _(b: ResearchBrief) -> str:
 def _(r: Roadmap) -> str:
     lines = [f"## Roadmap v{r.version}", f"**Goal.** {r.goal}", ""]
     for m in r.milestones:
-        mark = "▶" if m.id == r.current_milestone_id else " "
+        mark = "▶ " if m.id == r.current_milestone_id else ""
         deps = f" (depends on {', '.join(m.depends_on)})" if m.depends_on else ""
-        lines.append(f"{mark} **{m.id} · {m.title}** [{m.status}]{deps}")
-        lines += [f"    - {c.id}: {c.text}" for c in m.acceptance_criteria]
+        lines.append(f"- {mark}**{m.id} · {m.title}** [{m.status}]{deps}")
+        lines += [f"  - {c.id}: {c.text}" for c in m.acceptance_criteria]
     lines += ["", f"**Rationale.** {r.rationale}"]
     if r.decisions_log:
         lines += ["", "**Decisions**", _bullets(r.decisions_log)]
