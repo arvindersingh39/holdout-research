@@ -94,12 +94,15 @@ class Git:
         self.run("reset", "-q", "--hard", ref)
         self.run("clean", "-q", "-fd", "--", "src", "bench")
 
-    def apply_patch(self, diff: str) -> tuple[bool, str]:
-        """Apply a unified diff that touches only src/ or bench/. Returns (ok, reason)."""
+    def apply_patch(
+        self, diff: str, allowed_dirs: tuple[str, ...] = PATCH_DIRS
+    ) -> tuple[bool, str]:
+        """Apply a unified diff touching only `allowed_dirs` (default src/ and bench/).
+        Returns (ok, reason)."""
         paths = patch_paths(diff)
         if not paths:
             return False, "no file paths found in the diff"
-        allowed = tuple(f"{d}/" for d in PATCH_DIRS)
+        allowed = tuple(f"{d}/" for d in allowed_dirs)
         frozen = tuple(f"{d}/" for d in FROZEN_DIRS)
         bad = [
             p
@@ -107,7 +110,7 @@ class Git:
             if not p.startswith(allowed) or p.startswith(frozen) or ".." in Path(p).parts
         ]
         if bad:
-            return False, f"paths not allowed (only {', '.join(PATCH_DIRS)}/): {', '.join(bad)}"
+            return False, f"paths not allowed (only {', '.join(allowed_dirs)}/): {', '.join(bad)}"
         with tempfile.NamedTemporaryFile("w", suffix=".diff", delete=False) as f:
             f.write(diff if diff.endswith("\n") else diff + "\n")
             patch_file = f.name

@@ -138,6 +138,8 @@ class LocalProcessBackend:
         self.ws = ws
 
     def _translate(self, cmd: list[str]) -> list[str]:
+        if cmd[:2] == ["radon", "raw"]:  # radon is only in the sandbox image (D28)
+            cmd = ["python", "/harness/sloc_runner.py", cmd[-1]]
         out = [sys.executable if c == "python" else c for c in cmd]
         return [
             str(RUNNERS_DIR / c.removeprefix("/harness/")) if c.startswith("/harness/") else c
