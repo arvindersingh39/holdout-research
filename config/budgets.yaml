@@ -10,6 +10,10 @@ optimizer_patience: 2            # consecutive attempts below min_gain, then sto
 optimizer_target_runtime_s: null # set per milestone by MathSpec.bench when known
 bench_repeats: 5                 # rerun with 9 if coefficient of variation > 10%
 sandbox: {cpus: 2, memory: 4g, pids: 256, test_timeout_s: 300, bench_timeout_s: 600}
+ingest:
+  chunk_tokens: 800
+  chunk_overlap_tokens: 100
+  paper_card_input_tokens: 12000   # how much of each paper the retriever reads
 context_pack_tokens: {short_planner: 1500, math_designer: 2500, writer_section: 2000}
 gates:
   channel: whatsapp                  # cli | whatsapp (D2); tests use cli

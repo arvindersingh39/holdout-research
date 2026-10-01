@@ -36,6 +36,9 @@ def test_repo_config_loads() -> None:
     assert s.budgets.sandbox.memory == "4g"
     assert s.budgets.gates.channel == "whatsapp"
     assert s.budgets.contract_token_caps["Roadmap"] == 2000
+    assert s.budgets.ingest.chunk_tokens == 800
+    assert s.budgets.ingest.chunk_overlap_tokens == 100
+    assert s.budgets.ingest.paper_card_input_tokens == 12000
     assert [c.id for c in s.rubric.criteria] == ["R1", "R2", "R3", "R4", "R5"]
 
 
@@ -61,6 +64,8 @@ def test_missing_file_rejected(config_dir: Path) -> None:
         ("budgets.yaml", lambda d: d["gates"].update(channel="telegram")),
         ("budgets.yaml", lambda d: d["gates"].update(review_tests="sometimes")),
         ("budgets.yaml", lambda d: d["sandbox"].update(memory="lots")),
+        ("budgets.yaml", lambda d: d["ingest"].update(chunk_overlap_tokens=800)),
+        ("budgets.yaml", lambda d: d["ingest"].update(chunk_tokens=0)),
         ("models.yaml", lambda d: d["roles"].pop("coder")),
         ("models.yaml", lambda d: d["roles"].update(stranger={"model": "x/y", "max_tokens": 1})),
         ("models.yaml", lambda d: d["roles"]["writer"].update(max_tokens=0)),

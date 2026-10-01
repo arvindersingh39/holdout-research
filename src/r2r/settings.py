@@ -94,6 +94,18 @@ class SandboxLimits(_Strict):
     bench_timeout_s: PositiveInt
 
 
+class IngestLimits(_Strict):
+    chunk_tokens: PositiveInt
+    chunk_overlap_tokens: Annotated[int, Field(ge=0)]
+    paper_card_input_tokens: PositiveInt
+
+    @model_validator(mode="after")
+    def _overlap_below_chunk(self) -> IngestLimits:
+        if self.chunk_overlap_tokens >= self.chunk_tokens:
+            raise ValueError("chunk_overlap_tokens must be smaller than chunk_tokens")
+        return self
+
+
 class ContextPackTokens(_Strict):
     short_planner: PositiveInt
     math_designer: PositiveInt
@@ -130,6 +142,7 @@ class BudgetsConfig(_Strict):
     optimizer_target_runtime_s: PositiveFloat | None = None
     bench_repeats: PositiveInt
     sandbox: SandboxLimits
+    ingest: IngestLimits
     context_pack_tokens: ContextPackTokens
     gates: GatesConfig
     contract_token_caps: dict[str, PositiveInt]
