@@ -60,9 +60,9 @@ def test_pilot_to_reviewed_spec(tmp_path: Path) -> None:
     assert channel.gates[0].gate == "roadmap"
     assert channel.gates[-1].gate in ("result", "escalation")
     assert result.status == "stopped"
-    for v in [state.get("verdict")]:
-        if v is not None:
-            console.print(Markdown(render(v)))
+    for key in ("brief", "spec", "verdict"):
+        if state.get(key) is not None:
+            console.print(Markdown(render(state[key])))
 
     console.print("\n## Spend by role")
     for role, s in deps.ledger.by_role("live-plan").items():
