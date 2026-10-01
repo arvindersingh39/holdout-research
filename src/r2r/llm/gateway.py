@@ -129,6 +129,7 @@ def call_structured[C: BaseModel](
         except (ValueError, ContractTooLarge) as e:  # ValidationError is a ValueError
             error = _describe(e)
             log.warning("invalid output", extra={"role": role, "attempt": attempt, "error": error})
+            ctx.ledger.annotate_latest(ctx.run_id, role, f"rejected output: {error}"[:500])
         if attempt == 1:
             messages += [
                 {"role": "assistant", "content": raw or ""},

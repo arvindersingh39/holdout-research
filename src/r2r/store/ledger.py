@@ -80,6 +80,15 @@ class Ledger:
                 [values[c] for c in _COLUMNS],
             )
 
+    def annotate_latest(self, run_id: str, role: str, error: str) -> None:
+        """Attach a note (e.g. why an output was rejected) to the newest row for this role."""
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute(
+                "UPDATE llm_calls SET error = ? WHERE rowid = (SELECT MAX(rowid) FROM llm_calls "
+                "WHERE run_id = ? AND role = ?)",
+                (error, run_id, role),
+            )
+
     def spent(self, run_id: str, milestone_id: str | None = None) -> float:
         sql, args = "SELECT COALESCE(SUM(cost_usd), 0) FROM llm_calls WHERE run_id = ?", [run_id]
         if milestone_id is not None:

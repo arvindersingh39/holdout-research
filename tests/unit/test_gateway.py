@@ -74,14 +74,20 @@ def test_invalid_then_repaired(ctx: CallContext, fake: FakeLLM) -> None:
     repair = fake.calls[1].messages
     assert repair[-2]["role"] == "assistant"
     assert "version" in repair[-1]["content"]  # the validation error text is sent back
-    assert len(ctx.ledger.rows("run-test")) == 2
+    rows = ctx.ledger.rows("run-test")
+    assert len(rows) == 2
+    assert rows[0].ok and rows[0].error and rows[0].error.startswith("rejected output:")
+    assert "version" in rows[0].error  # why the first answer needed a repair is kept
+    assert rows[1].error is None
 
 
 def test_two_invalid_outputs_raise(ctx: CallContext, fake: FakeLLM) -> None:
     fake.script("long_planner", "not json", '{"version": 1}')
     with pytest.raises(ContractViolation):
         _call(ctx)
-    assert len(ctx.ledger.rows("run-test")) == 2
+    rows = ctx.ledger.rows("run-test")
+    assert len(rows) == 2
+    assert all(r.error and r.error.startswith("rejected output:") for r in rows)
 
 
 def test_cap_overflow_counts_as_invalid(ctx: CallContext, fake: FakeLLM) -> None:
