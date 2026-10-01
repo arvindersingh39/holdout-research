@@ -66,8 +66,10 @@ def test_pilot_to_reviewed_spec(tmp_path: Path) -> None:
 
     console.print("\n## Spend by role")
     for role, s in deps.ledger.by_role("live-plan").items():
-        console.print(f"{role:14} calls={s.calls} in={s.input_tokens} out={s.output_tokens} "
-                      f"cache_read={s.cache_read_tokens} ${s.cost_usd:.4f}")  # fmt: skip
+        console.print(
+            f"{role:14} calls={s.calls} in={s.input_tokens} out={s.output_tokens} "
+            f"cache_read={s.cache_read_tokens} ${s.cost_usd:.4f}"
+        )
     total = deps.ledger.spent("live-plan")
     console.print(f"TOTAL ${total:.4f}")
     assert total < 0.50
@@ -76,5 +78,7 @@ def test_pilot_to_reviewed_spec(tmp_path: Path) -> None:
     for req, resp in client.log:
         if req.role == "long_planner":
             visible = estimate_tokens(resp.text or "", req.model)
-            console.print(f"long_planner: billed out={resp.output_tokens} visible≈{visible} "
-                          f"reasoning_chars={resp.reasoning_chars} thinking={req.thinking}")  # fmt: skip
+            console.print(
+                f"long_planner: billed out={resp.output_tokens} visible≈{visible} "
+                f"reasoning_chars={resp.reasoning_chars} thinking={req.thinking}"
+            )

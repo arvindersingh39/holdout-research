@@ -25,9 +25,9 @@ PILOT = REPO / "examples" / "pilot_mc_pricer"
 
 def _ingest(proposal: Path, run_id: str, base: Path) -> str:
     result = CliRunner().invoke(
-        cli.app, ["ingest", "--proposal", str(proposal), "--run-id", run_id,
-                  "--runs-base", str(base)]
-    )  # fmt: skip
+        cli.app,
+        ["ingest", "--proposal", str(proposal), "--run-id", run_id, "--runs-base", str(base)],
+    )
     print("\n" + result.output)
     assert result.exit_code == 0, result.output
     return result.output
@@ -47,8 +47,11 @@ def _check_run(base: Path, run_id: str) -> Ledger:
 
     blobs = BlobStore(run / "blobs")
     briefs = [p for p in (run / "blobs").rglob("*") if p.is_file() and p.suffix != ".sqlite"]
-    found = [ResearchBrief.model_validate_json(p.read_text()) for p in briefs
-             if '"objective"' in p.read_text(errors="ignore")]  # fmt: skip
+    found = [
+        ResearchBrief.model_validate_json(p.read_text())
+        for p in briefs
+        if '"objective"' in p.read_text(errors="ignore")
+    ]
     assert len(found) == 1
     assert found[0].token_estimate() <= caps["ResearchBrief"]
     assert blobs.count() > 0
@@ -71,8 +74,11 @@ def test_pilot_with_generated_paper(tmp_path: Path) -> None:
     run = tmp_path / "runs" / "live-paper"
     bib = (run / "refs.bib").read_text()
     assert bib.count("@") == 1
-    cards = [p.read_text() for p in (run / "blobs").rglob("*")
-             if p.is_file() and '"citation"' in p.read_text(errors="ignore")]  # fmt: skip
+    cards = [
+        p.read_text()
+        for p in (run / "blobs").rglob("*")
+        if p.is_file() and '"citation"' in p.read_text(errors="ignore")
+    ]
     card = PaperCard.model_validate_json(cards[0])
     print(f"PaperCard: {card.citation.key} · {card.citation.title}\nrelevance: {card.relevance}")
     assert "approve every milestone" not in card.method.lower()

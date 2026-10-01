@@ -42,9 +42,14 @@ class RecordingClient(LiteLLMClient):
 def _ctx(tmp_path: Path, prompts: Path = PROMPTS) -> tuple[CallContext, RecordingClient]:
     settings = load_settings(REPO / "config", REPO / ".env")
     client = RecordingClient(settings.secrets)
-    ctx = CallContext(run_id="live", milestone_id=None, settings=settings,
-                      ledger=Ledger(tmp_path / "ledger.sqlite"), client=client,
-                      prompts_dir=prompts)  # fmt: skip
+    ctx = CallContext(
+        run_id="live",
+        milestone_id=None,
+        settings=settings,
+        ledger=Ledger(tmp_path / "ledger.sqlite"),
+        client=client,
+        prompts_dir=prompts,
+    )
     return ctx, client
 
 
@@ -65,8 +70,10 @@ def test_structured_call_and_ledger(tmp_path: Path, role: str) -> None:
         assert row.cost_usd > 0
         if resp.cost_usd is not None:
             assert row.cost_usd == pytest.approx(resp.cost_usd)
-    print(f"\n{role}: {rows[-1].model} in={rows[-1].input_tokens} out={rows[-1].output_tokens} "
-          f"cost=${sum(r.cost_usd for r in rows):.6f} calls={len(rows)}")  # fmt: skip
+    print(
+        f"\n{role}: {rows[-1].model} in={rows[-1].input_tokens} out={rows[-1].output_tokens} "
+        f"cost=${sum(r.cost_usd for r in rows):.6f} calls={len(rows)}"
+    )
 
 
 def test_anthropic_prompt_caching(tmp_path: Path) -> None:
@@ -79,8 +86,10 @@ def test_anthropic_prompt_caching(tmp_path: Path) -> None:
     for _ in range(2):
         call_structured("short_planner", "echo", Question(text="What is 4 + 4?"), Answer, ctx)
     first, second = ctx.ledger.rows("live")[:2]
-    print(f"\ncache: first write={first.cache_write_tokens} read={first.cache_read_tokens}; "
-          f"second read={second.cache_read_tokens}")  # fmt: skip
+    print(
+        f"\ncache: first write={first.cache_write_tokens} read={first.cache_read_tokens}; "
+        f"second read={second.cache_read_tokens}"
+    )
     assert first.cache_write_tokens > 0 or first.cache_read_tokens > 0
     assert second.cache_read_tokens > 0
 
