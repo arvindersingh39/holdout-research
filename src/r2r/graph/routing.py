@@ -1,0 +1,78 @@
+"""Loop decisions as plain Python: never an LLM call (CLAUDE.md architecture rules)."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from r2r.contracts import CoordinatorVerdict, HumanDecision, Milestone, Roadmap
+
+END = "__end__"
+GateKind = Literal["roadmap", "escalation", "result", "publication"]
+_FINISHED = {"done", "skipped"}
+
+
+def next_milestone(roadmap: Roadmap) -> Milestone | None:
+    """The current milestone if it's still open, else the first open one whose deps are done."""
+    by_id = {m.id: m for m in roadmap.milestones}
+    current = by_id.get(roadmap.current_milestone_id or "")
+    if current and current.status not in _FINISHED and _deps_done(current, by_id):
+        return current
+    for m in roadmap.milestones:
+        if m.status not in _FINISHED and _deps_done(m, by_id):
+            return m
+    return None
+
+
+def _deps_done(m: Milestone, by_id: dict[str, Milestone]) -> bool:
+    return all(by_id[d].status in _FINISHED for d in m.depends_on if d in by_id)
+
+
+def mark_done(roadmap: Roadmap, milestone_id: str) -> Roadmap:
+    data = roadmap.model_dump()
+    for m in data["milestones"]:
+        if m["id"] == milestone_id:
+            m["status"] = "done"
+    return Roadmap.model_validate(data)
+
+
+def keep_finished(old: Roadmap | None, new: Roadmap) -> Roadmap:
+    """Code owns milestone status: anything finished before stays finished."""
+    if old is None:
+        return new
+    finished = {m.id: m.status for m in old.milestones if m.status in _FINISHED}
+    data = new.model_dump()
+    for m in data["milestones"]:
+        if m["id"] in finished:
+            m["status"] = finished[m["id"]]
+    return Roadmap.model_validate(data)
+
+
+def is_material_change(old: Roadmap | None, new: Roadmap) -> bool:
+    """Milestones added, removed or reordered, or the goal changed."""
+    if old is None:
+        return True
+    return old.goal != new.goal or [m.id for m in old.milestones] != [m.id for m in new.milestones]
+
+
+def route_after_coordinator(verdict: CoordinatorVerdict, rounds: int, max_rounds: int) -> str:
+    """`rounds` counts revise verdicts so far for this milestone, including this one."""
+    if verdict.verdict == "pass":
+        return "build"
+    if rounds > max_rounds:
+        return "escalation_gate"
+    if any(i.target == "roadmap" for i in verdict.issues):
+        return "long_plan"
+    return "short_plan"
+
+
+def route_after_gate(gate: GateKind, decision: HumanDecision) -> str:
+    if decision.action == "stop":
+        return END
+    if decision.action == "redirect":
+        return "long_plan"
+    return {
+        "roadmap": "short_plan",
+        "escalation": "build",
+        "result": "long_plan",
+        "publication": END,
+    }[gate]
