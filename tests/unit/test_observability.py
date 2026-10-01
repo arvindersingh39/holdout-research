@@ -171,3 +171,32 @@ def test_costs_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "M1" in text and "run-level" in text
     assert "Total" in text and "0.1040" in text
     assert "58%" in text  # coder cache-read share: 14000 / 24000
+
+
+def test_litellm_client_traces_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real client path (not FakeLLM): every provider call is handed to the tracer."""
+    import litellm
+
+    from r2r.llm.client import LLMCallError, LLMRequest
+
+    recorded: list = []
+    client = LiteLLMClient(Secrets())
+    client._tracer = type("T", (), {"record": lambda self, *a: recorded.append(a)})()
+    resp = litellm.ModelResponse(
+        model="x",
+        choices=[{"message": {"role": "assistant", "content": "hi"}}],
+        usage={"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+    )
+    monkeypatch.setattr(litellm, "completion", lambda **kw: resp)
+    req = LLMRequest(role="coder", model="anthropic/claude-sonnet-5-5", messages=[], max_tokens=5)
+    client.complete(req)
+
+    def boom(**kw):
+        raise ValueError("bad request")
+
+    monkeypatch.setattr(litellm, "completion", boom)
+    with pytest.raises(LLMCallError):
+        client.complete(req)
+    assert (
+        recorded[0][1].text == "hi" and recorded[1][1] is None and "bad request" in recorded[1][2]
+    )

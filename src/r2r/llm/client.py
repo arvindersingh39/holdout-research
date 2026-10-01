@@ -66,10 +66,6 @@ class LLMRequest:
 class LLMClient(Protocol):
     def complete(self, req: LLMRequest) -> LLMResponse: ...
 
-    def _trace(self, req: LLMRequest, resp: LLMResponse | None, error: str | None = None) -> None:
-        if self._tracer is not None:
-            self._tracer.record(req, resp, error)
-
     def embed(self, model: str, texts: list[str]) -> EmbedResponse: ...
 
     def supports_response_schema(self, model: str) -> bool: ...
@@ -165,6 +161,10 @@ class LiteLLMClient:
         )
         self._trace(req, out)
         return out
+
+    def _trace(self, req: LLMRequest, resp: LLMResponse | None, error: str | None = None) -> None:
+        if self._tracer is not None:
+            self._tracer.record(req, resp, error)
 
     def embed(self, model: str, texts: list[str]) -> EmbedResponse:
         if model.startswith("local/"):
