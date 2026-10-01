@@ -103,5 +103,11 @@ def route_after_code(tampered: bool, passed: bool, sessions: int, max_sessions: 
     if tampered:
         return "tamper_gate"
     if passed:
-        return "digest"
+        return "opt_baseline"
     return "code" if sessions < max_sessions else "coder_gate"
+
+
+def route_after_optimize(tampered: bool, stop_reason: str | None) -> str:
+    if tampered:
+        return "tamper_gate"
+    return "digest" if stop_reason else "optimize"

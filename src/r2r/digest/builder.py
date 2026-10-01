@@ -22,6 +22,10 @@ def build_digest(
     run_id: str,
     milestone_id: str,
     test_files: Sequence[str] | None,
+    runtime_baseline_s: float | None = None,
+    runtime_final_s: float | None = None,
+    optimizer_attempts: int = 0,
+    optimizer_stop: str | None = None,
 ) -> ResultDigest:
     mine = [c for c in cases if test_files is None or c.file in test_files]
     criteria = []
@@ -46,6 +50,13 @@ def build_digest(
         deviations = f"Criteria not met: {', '.join(failed_ids)}."
     if n_fail and not failed_ids:
         deviations = f"{n_fail} test(s) outside this milestone's criteria are failing."
+    metrics = {"tests_passed": float(n_pass), "tests_failed": float(n_fail)}
+    if runtime_baseline_s is not None:
+        metrics["runtime_baseline_s"] = runtime_baseline_s
+        metrics["runtime_final_s"] = runtime_final_s or runtime_baseline_s
+        metrics["optimizer_attempts"] = float(optimizer_attempts)
+    if optimizer_stop:
+        deviations = f"{deviations} Optimizer stopped: {optimizer_stop}.".strip()
     rows = [r for r in ledger.rows(run_id) if r.milestone_id == milestone_id]
     return ResultDigest(
         created_by="digest",
@@ -53,7 +64,7 @@ def build_digest(
         milestone_id=milestone_id,
         status=status,
         criteria=criteria,
-        metrics={"tests_passed": float(n_pass), "tests_failed": float(n_fail)},
+        metrics=metrics,
         deviations=deviations[:DEVIATIONS_CHARS],
         cost_usd=ledger.spent(run_id, milestone_id),
         tokens=sum(r.input_tokens + r.output_tokens for r in rows),

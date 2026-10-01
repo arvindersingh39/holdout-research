@@ -117,7 +117,8 @@ BROKEN_TESTS = (
 )
 
 
-def design(n: int, tests: str = GOOD_TESTS) -> MathDesign:
+def design(n: int, tests: str = GOOD_TESTS, bench: bool = False) -> MathDesign:
+    """`bench=False` (default) skips the optimizer loop for that milestone."""
     pkg = f"sq{n}"
     meta = {"created_by": "math_designer", "run_id": "g", "milestone_id": f"M{n}"}
     test_file = f"tests/frozen/test_m{n}_square.py"
@@ -129,19 +130,25 @@ def design(n: int, tests: str = GOOD_TESTS) -> MathDesign:
         signatures=["square(x: float) -> float"],
         test_files=[test_file],
         check_files=[check_file],
-        bench=BenchSpec(entrypoint=f"bench/bench_m{n}.py", problem_size="1 call"),
+        bench=BenchSpec(entrypoint=f"bench/bench_m{n}.py", problem_size="2000 calls")
+        if bench
+        else None,
     )
     files = [
         FileSpec(path=test_file, purpose="test", content=tests.format(pkg=pkg)),
         FileSpec(path=check_file, purpose="check", content="assert (2 + 3) ** 2 == 25\n"),
         FileSpec(path=f"src/{pkg}/__init__.py", purpose="stub", content=""),
         FileSpec(path=f"src/{pkg}/core.py", purpose="stub", content=STUB),
-        FileSpec(
-            path=f"bench/bench_m{n}.py",
-            purpose="bench",
-            content=f"from {pkg}.core import square\n\n\ndef main():\n    square(2.0)\n",
-        ),
     ]
+    if bench:
+        body = "def main():\n    for _ in range(2000):\n        square(2.0)\n"
+        files.append(
+            FileSpec(
+                path=f"bench/bench_m{n}.py",
+                purpose="bench",
+                content=f"from {pkg}.core import square\n\n\n{body}",
+            )
+        )
     return MathDesign(**meta, spec=spec, files=files)
 
 

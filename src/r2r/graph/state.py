@@ -10,6 +10,8 @@ from r2r.contracts import (
     MathSpec,
     MilestoneSpec,
     OptimizationOutcome,
+    OptimizationPatch,
+    ProfileReport,
     Proposal,
     ResearchBrief,
     ResultDigest,
@@ -38,7 +40,14 @@ class PipelineState(TypedDict, total=False):
     coder_sessions: int
     tamper: str | None  # FrozenTamper message waiting at the tamper gate
     tamper_attempts: int  # blocked writes to frozen files, over the whole run
-    opt_outcomes: list[OptimizationOutcome]  # Phase 6
+    opt_outcomes: list[OptimizationOutcome]
+    opt_patches: list[OptimizationPatch | None]  # aligned with opt_outcomes; None = no valid patch
+    opt_baseline_s: float | None
+    opt_runtime_s: float | None  # current best
+    opt_sloc: int
+    opt_bench_hash: str | None
+    opt_profile: ProfileReport | None
+    opt_stop_reason: str | None
     digest: ResultDigest | None
     human_decision: HumanDecision | None
     human_note: str | None  # a redirect note waiting for the long-term planner

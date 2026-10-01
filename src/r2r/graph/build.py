@@ -27,6 +27,7 @@ from r2r.graph.routing import (
     route_after_coordinator,
     route_after_design,
     route_after_gate,
+    route_after_optimize,
 )
 from r2r.graph.state import PipelineState
 
@@ -70,6 +71,14 @@ def _after_code(state: PipelineState, max_sessions: int) -> str:
     )
 
 
+def _after_opt_baseline(state: PipelineState) -> str:
+    return "digest" if state.get("opt_stop_reason") else "optimize"
+
+
+def _after_optimize(state: PipelineState) -> str:
+    return route_after_optimize(bool(state.get("tamper")), state.get("opt_stop_reason"))
+
+
 def _after_gate(state: PipelineState, gate: GateKind) -> str:
     return route_after_gate(gate, state["human_decision"])
 
@@ -84,6 +93,8 @@ def build_graph(deps: RunDeps) -> StateGraph:
         "design": nodes.design,
         "freeze": nodes.freeze_tests,
         "code": nodes.code,
+        "opt_baseline": nodes.opt_baseline,
+        "optimize": nodes.optimize,
         "digest": nodes.digest,
         "finish": nodes.finish,
     }
@@ -111,8 +122,10 @@ def build_graph(deps: RunDeps) -> StateGraph:
     g.add_conditional_edges(
         "code",
         partial(_after_code, max_sessions=b.coder_max_sessions),
-        ["tamper_gate", "digest", "code", "coder_gate"],
+        ["tamper_gate", "opt_baseline", "code", "coder_gate"],
     )
+    g.add_conditional_edges("opt_baseline", _after_opt_baseline, ["digest", "optimize"])
+    g.add_conditional_edges("optimize", _after_optimize, ["tamper_gate", "digest", "optimize"])
     g.add_edge("digest", "result_gate")
     targets = {
         "roadmap": ["short_plan", "long_plan", END],

@@ -13,26 +13,33 @@ from r2r.agents.coder import CoderTools, run_coder_session
 from r2r.agents.coordinator import run_coordinator
 from r2r.agents.long_planner import run_long_planner
 from r2r.agents.math_designer import DesignError, run_math_designer, write_design
+from r2r.agents.optimizer import notes, run_optimizer
 from r2r.agents.retriever import run_retriever
 from r2r.agents.short_planner import run_short_planner
 from r2r.contracts import (
     HumanDecision,
     Milestone,
     MilestoneSpec,
+    OptimizationOutcome,
     Roadmap,
 )
 from r2r.digest.builder import build_digest
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest, gate_request
-from r2r.graph.render import render, render_files
+from r2r.graph.render import render, render_attempts, render_files
 from r2r.graph.routing import is_material_change, mark_done, next_milestone
 from r2r.graph.state import PipelineState
 from r2r.harness.checks import run_checks
 from r2r.harness.frozen import FrozenTamper, freeze, restore
 from r2r.harness.gitops import Git
+from r2r.harness.hotspots import hotspot_source
+from r2r.harness.optimize import Baseline, baseline, try_patch
+from r2r.harness.profile import run_profile
 from r2r.harness.redgreen import assess
+from r2r.harness.stoprule import decide
 from r2r.harness.tests import run_tests, run_tests_detailed
 from r2r.ingest.proposal import ingest_proposal
+from r2r.llm.gateway import BudgetExceeded, ContractViolation
 from r2r.retrieval.context_pack import build_pack
 
 Update = dict[str, Any]
@@ -214,6 +221,121 @@ def code(state: PipelineState, deps: RunDeps) -> Update:
     return update | {"test_result": final, "tamper": None}
 
 
+def _target(state: PipelineState, deps: RunDeps) -> float | None:
+    bench = state["math_spec"].bench
+    if bench is not None and bench.target_runtime_s is not None:
+        return bench.target_runtime_s
+    return deps.settings.budgets.optimizer_target_runtime_s
+
+
+def opt_baseline(state: PipelineState, deps: RunDeps) -> Update:
+    """Measure the passing code before optimising: bench, lines of code, profile, bench hash."""
+    ms = state["math_spec"]
+    reset: Update = {"opt_outcomes": [], "opt_patches": [], "opt_stop_reason": None}
+    if ms.bench is None:
+        return reset | {"opt_stop_reason": "no benchmark", "opt_baseline_s": None}
+    m = _milestone(state)
+    b = baseline(
+        deps.workspace(),
+        deps.sandbox(),
+        ms.bench.entrypoint,
+        deps.settings.budgets,
+        run_id=deps.run_id,
+        milestone_id=m.id,
+    )
+    action, reason = decide([], deps.settings.budgets, _target(state, deps), b.runtime_s)
+    return reset | {
+        "opt_baseline_s": b.runtime_s,
+        "opt_runtime_s": b.runtime_s,
+        "opt_sloc": b.sloc,
+        "opt_bench_hash": b.bench_hash,
+        "opt_profile": b.profile,
+        "opt_stop_reason": reason if action == "stop" else None,
+    }
+
+
+def optimize(state: PipelineState, deps: RunDeps) -> Update:
+    """One optimizer attempt: #6 proposes, the harness keeps or reverts, the stop rule decides."""
+    m = _milestone(state)
+    ms = state["math_spec"]
+    cfg = deps.settings.budgets
+    ws, box = deps.workspace(), deps.sandbox()
+    outcomes = list(state.get("opt_outcomes", []))
+    patches = list(state.get("opt_patches", []))
+    attempt = len(outcomes) + 1
+    current = Baseline(
+        state["opt_runtime_s"],
+        0.0,
+        state["opt_sloc"],
+        state["opt_bench_hash"],
+        state["opt_profile"],
+    )
+    target = _target(state, deps)
+    try:
+        patch = run_optimizer(
+            current.profile,
+            hotspot_source(ws, current.profile),
+            current.runtime_s,
+            target,
+            ms,
+            notes(patches, outcomes),
+            deps.ctx(m.id),
+        )
+    except BudgetExceeded as e:
+        return {"opt_stop_reason": f"budget exhausted ({e})"}  # D40
+    except ContractViolation as e:
+        patch = None
+        outcome = OptimizationOutcome(
+            created_by="harness",
+            run_id=deps.run_id,
+            milestone_id=m.id,
+            attempt=attempt,
+            accepted=False,
+            reason=f"rejected: no valid patch ({str(e)[:200]})",
+            runtime_before_s=current.runtime_s,
+            sloc_before=current.sloc,
+        )
+    else:
+        try:
+            outcome = try_patch(
+                ws,
+                box,
+                Git(ws),
+                patch,
+                current,
+                attempt,
+                ms.bench.entrypoint,
+                cfg,
+                run_id=deps.run_id,
+                milestone_id=m.id,
+            )
+        except FrozenTamper as e:
+            return {"tamper": str(e)}
+    update: Update = {}
+    if outcome.accepted:
+        profile = run_profile(
+            ws,
+            box,
+            ms.bench.entrypoint,
+            cfg.sandbox.bench_timeout_s,
+            run_id=deps.run_id,
+            milestone_id=m.id,
+        )
+        update |= {
+            "opt_runtime_s": outcome.runtime_after_s,
+            "opt_sloc": outcome.sloc_after,
+            "opt_profile": profile,
+        }
+    outcomes.append(outcome)
+    patches.append(patch)
+    action, reason = decide(outcomes, cfg, target, state["opt_baseline_s"])
+    return update | {
+        "opt_outcomes": outcomes,
+        "opt_patches": patches,
+        "opt_stop_reason": reason if action == "stop" else None,
+    }
+
+
 def digest(state: PipelineState, deps: RunDeps) -> Update:
     m = _milestone(state)
     ws, box = deps.workspace(), deps.sandbox()
@@ -231,6 +353,10 @@ def digest(state: PipelineState, deps: RunDeps) -> Update:
         run_id=deps.run_id,
         milestone_id=m.id,
         test_files=state["math_spec"].test_files,
+        runtime_baseline_s=state.get("opt_baseline_s"),
+        runtime_final_s=state.get("opt_runtime_s"),
+        optimizer_attempts=len(state.get("opt_outcomes", [])),
+        optimizer_stop=state.get("opt_stop_reason"),
     )
     return {"digest": d, "test_result": result}
 
@@ -290,10 +416,12 @@ def escalation_gate(state: PipelineState, deps: RunDeps) -> Update:
 
 def result_gate(state: PipelineState, deps: RunDeps) -> Update:
     digest = state["digest"]
+    md = render(digest)
+    attempts = render_attempts(state.get("opt_patches", []), state.get("opt_outcomes", []))
+    if attempts:
+        md += "\n\n" + attempts
     d = _ask(
-        gate_request(
-            "result", f"Review the result of {digest.milestone_id}", digest, editable=False
-        )
+        GateRequest(gate="result", title=f"Review the result of {digest.milestone_id}", markdown=md)
     )
     update: Update = {"human_decision": d}
     if d.action == "stop":
@@ -310,6 +438,13 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
         "test_result": None,
         "coder_sessions": 0,
         "tamper": None,
+        "opt_outcomes": [],
+        "opt_patches": [],
+        "opt_baseline_s": None,
+        "opt_runtime_s": None,
+        "opt_profile": None,
+        "opt_stop_reason": None,
+        "opt_bench_hash": None,
     }
     if d.action in ("approve", "edit"):
         update |= reset | {

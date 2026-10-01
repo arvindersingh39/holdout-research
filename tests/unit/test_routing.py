@@ -109,9 +109,14 @@ def test_route_after_design_and_code() -> None:
     assert route_after_design(False, 1, review=True) == "design"  # one automatic redesign
     assert route_after_design(False, 2, review=True) == "design_gate"
     assert route_after_code(True, True, 1, 3) == "tamper_gate"
-    assert route_after_code(False, True, 1, 3) == "digest"
+    assert route_after_code(False, True, 1, 3) == "opt_baseline"
     assert route_after_code(False, False, 2, 3) == "code"
     assert route_after_code(False, False, 3, 3) == "coder_gate"
+    from r2r.graph.routing import route_after_optimize
+
+    assert route_after_optimize(True, None) == "tamper_gate"
+    assert route_after_optimize(False, "patience") == "digest"
+    assert route_after_optimize(False, None) == "optimize"
     rm = roadmap()
     assert needs_test_review("first_milestone", rm)
     assert not needs_test_review("first_milestone", mark_done(rm, "M1"))
