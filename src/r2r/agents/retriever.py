@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from pydantic import BaseModel, ConfigDict, create_model
+from pydantic import BaseModel
 
-from r2r.contracts import BlobRef, PaperCard, Proposal, ResearchBrief, ensure_within_cap
+from r2r.agents.common import draft_model, finalize
+from r2r.contracts import BlobRef, PaperCard, Proposal, ResearchBrief
 from r2r.ingest.citations import to_bibtex
 from r2r.ingest.documents import wrap_document
 from r2r.llm.gateway import CallContext, call_structured
@@ -20,18 +20,9 @@ from r2r.store.blobs import BlobStore
 from r2r.store.runs import RunPaths
 
 ROLE = "retriever"
-_FILLED_BY_CODE = {"created_by", "run_id", "milestone_id", "paper_cards"}
 
 # What the model returns for the brief: ResearchBrief minus the fields code fills in (D20).
-BriefDraft: type[BaseModel] = create_model(  # type: ignore[call-overload]
-    "ResearchBriefDraft",
-    __config__=ConfigDict(extra="forbid"),
-    **{
-        n: (f.annotation, f)
-        for n, f in ResearchBrief.model_fields.items()
-        if n not in _FILLED_BY_CODE
-    },
-)
+BriefDraft = draft_model(ResearchBrief, {"paper_cards"})
 
 
 class PaperInput(BaseModel):
@@ -55,7 +46,6 @@ def run_retriever(
     proposal: Proposal, blobs: BlobStore, paths: RunPaths, ctx: CallContext
 ) -> RetrieverResult:
     limit = ctx.settings.budgets.ingest.paper_card_input_tokens
-    model = ctx.settings.models.roles[ROLE].model
 
     cards: list[PaperCard] = []
     card_refs: list[BlobRef] = []
@@ -80,14 +70,9 @@ def run_retriever(
         BriefDraft,
         ctx,
     )
-    data: dict[str, Any] = {
-        **draft.model_dump(),
-        "created_by": ROLE,
-        "run_id": ctx.run_id,
-        "milestone_id": None,
-        "paper_cards": [r.model_dump() for r in card_refs],
-    }
-    brief = ensure_within_cap(ResearchBrief.model_validate(data), model)
+    brief = finalize(
+        ResearchBrief, draft, ROLE, ctx, paper_cards=[r.model_dump() for r in card_refs]
+    )
     brief_ref = blobs.put(
         brief.model_dump_json(),
         kind="contract",

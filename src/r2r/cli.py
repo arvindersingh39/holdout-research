@@ -84,3 +84,127 @@ def ingest(
     )
     console.print(f"Brief blob: {res.brief_ref.blob_id[:12]} · refs.bib: {res.bib_path}")
     console.print(f"Cost: ${ctx.ledger.spent(run_id):.4f}")
+
+
+# --- the pipeline: run, resume, status, show ----------------------------------------------
+
+SHOWABLE = ("brief", "roadmap", "spec", "verdict", "digest")
+RunsBase = Annotated[Path | None, typer.Option(help="Where runs/ lives (default: repo)")]
+
+
+def _deps(run_id: str, runs_base: Path | None, proposal: Path | None = None):
+    from r2r.graph.deps import RunDeps
+    from r2r.log import configure_logging
+
+    root = project_root()
+    settings = load_settings(root / "config", root / ".env")
+    configure_logging("WARNING", settings.secrets)
+    base = runs_base or root
+    if proposal is not None:
+        return RunDeps.create(
+            run_id, proposal, settings, make_client(settings), base, root / "prompts"
+        )
+    try:
+        return RunDeps.load(run_id, settings, make_client(settings), base, root / "prompts")
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(2) from None
+
+
+def make_channel(settings: Settings):
+    """The gate channel from budgets.yaml. WhatsApp arrives in Phase 7; until then, terminal."""
+    from r2r.graph.gates import TerminalChannel
+
+    if settings.budgets.gates.channel == "whatsapp":
+        console.print("[yellow]WhatsApp gates arrive in Phase 7; using the terminal for now.[/]")
+    return TerminalChannel(console=console)
+
+
+def _drive(deps, start: bool) -> None:
+    from r2r.graph.driver import drive, open_graph
+    from r2r.llm.gateway import BudgetExceeded, ContractViolation
+
+    with open_graph(deps) as graph:
+        try:
+            result = drive(graph, deps.run_id, make_channel(deps.settings), start=start)
+        except (BudgetExceeded, ContractViolation) as e:
+            console.print(f"[red]{type(e).__name__}:[/] {e}")
+            console.print(f"Progress is saved. Fix the cause, then `r2r resume {deps.run_id}`.")
+            raise typer.Exit(1) from None
+    spent = deps.ledger.spent(deps.run_id)
+    console.print(f"Run {deps.run_id}: [bold]{result.status}[/] · spent ${spent:.4f}")
+
+
+@app.command()
+def run(
+    proposal: Annotated[Path, typer.Option(help="Folder with proposal.md and optional papers/")],
+    run_id: Annotated[str | None, typer.Option(help="Run id (default: folder name + time)")] = None,
+    runs_base: RunsBase = None,
+) -> None:
+    """Start a run: retrieve, plan, and stop at every human gate."""
+    if not (proposal / "proposal.md").is_file():
+        console.print(f"[red]{proposal}/proposal.md not found[/]")
+        raise typer.Exit(2)
+    run_id = run_id or f"{proposal.resolve().name}-{datetime.now():%Y%m%d-%H%M%S}"
+    _drive(_deps(run_id, runs_base, proposal), start=True)
+
+
+@app.command()
+def resume(run_id: str, runs_base: RunsBase = None) -> None:
+    """Continue a run from its last checkpoint (for example a gate you left pending)."""
+    _drive(_deps(run_id, runs_base), start=False)
+
+
+@app.command()
+def status(run_id: str, runs_base: RunsBase = None) -> None:
+    """Where a run is: pending gate or next step, roadmap, current milestone, spend."""
+    from r2r.graph.driver import config, open_graph, pending_gate
+    from r2r.graph.routing import next_milestone
+
+    deps = _deps(run_id, runs_base)
+    with open_graph(deps) as graph:
+        snap = graph.get_state(config(run_id))
+        gate = pending_gate(graph, run_id)
+    values = snap.values
+    console.print(f"Run {run_id} · status: {values.get('status', 'not started')}")
+    if gate:
+        console.print(f"Waiting at gate: {gate.gate} · {gate.title}")
+    elif snap.next:
+        console.print(f"Next step: {', '.join(snap.next)}")
+    rm = values.get("roadmap")
+    if rm is not None:
+        m = next_milestone(rm)
+        done = sum(x.status == "done" for x in rm.milestones)
+        console.print(
+            f"Roadmap v{rm.version}: {done}/{len(rm.milestones)} milestones done"
+            + (f" · current {m.id} {m.title}" if m else "")
+        )
+    console.print(f"Spent: ${deps.ledger.spent(run_id):.4f}")
+
+
+@app.command()
+def show(
+    run_id: str,
+    contract: Annotated[str, typer.Argument(help=f"One of: {', '.join(SHOWABLE)}")],
+    runs_base: RunsBase = None,
+) -> None:
+    """Render a contract from the run's latest state."""
+    from rich.markdown import Markdown
+
+    from r2r.graph.driver import config, open_graph
+    from r2r.graph.render import render
+
+    if contract not in SHOWABLE:
+        console.print(f"[red]Choose one of: {', '.join(SHOWABLE)}[/]")
+        raise typer.Exit(2)
+    deps = _deps(run_id, runs_base)
+    with open_graph(deps) as graph:
+        value = graph.get_state(config(run_id)).values.get(contract)
+    if value is None:
+        console.print(f"No {contract} yet in run {run_id}.")
+        raise typer.Exit(1)
+    console.print(Markdown(render(value)))
+
+
+if __name__ == "__main__":
+    app()
