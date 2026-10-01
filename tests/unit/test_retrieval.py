@@ -25,8 +25,10 @@ def _store(
     tmp_path: Path, ctx: CallContext, texts=TEXTS
 ) -> tuple[VectorIndex, BlobStore, list[BlobRef]]:
     blobs = BlobStore(tmp_path / "blobs")
-    refs = [blobs.put(t, kind="chunk", summary=t.split("\n")[0][:80], created_by="retriever")
-            for t in texts]  # fmt: skip
+    refs = [
+        blobs.put(t, kind="chunk", summary=t.split("\n")[0][:80], created_by="retriever")
+        for t in texts
+    ]
     index = VectorIndex(tmp_path / "vectors", ctx)
     index.add(refs, texts)
     return index, blobs, refs
@@ -84,8 +86,9 @@ def test_pack_skips_oversized_but_keeps_later_fits(tmp_path: Path, ctx: CallCont
     max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
 @given(budget=st.integers(min_value=0, max_value=200), k=st.integers(min_value=1, max_value=6))
-def test_budget_never_exceeded(tmp_path_factory: pytest.TempPathFactory, ctx: CallContext,
-                               budget: int, k: int) -> None:  # fmt: skip
+def test_budget_never_exceeded(
+    tmp_path_factory: pytest.TempPathFactory, ctx: CallContext, budget: int, k: int
+) -> None:
     tmp = tmp_path_factory.mktemp("pack")
     index, blobs, _ = _store(tmp, ctx)
     pack = build_pack("variance pricing formula", budget, k, index, blobs)

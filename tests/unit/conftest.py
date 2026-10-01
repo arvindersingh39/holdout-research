@@ -32,9 +32,14 @@ def fake() -> FakeLLM:
 @pytest.fixture
 def ctx(settings: Settings, ledger: Ledger, fake: FakeLLM) -> CallContext:
     return CallContext(
-        run_id="run-test", milestone_id="M1", settings=settings, ledger=ledger, client=fake,
-        prompts_dir=REPO / "prompts", retry_wait_max_s=0,
-    )  # fmt: skip
+        run_id="run-test",
+        milestone_id="M1",
+        settings=settings,
+        ledger=ledger,
+        client=fake,
+        prompts_dir=REPO / "prompts",
+        retry_wait_max_s=0,
+    )
 
 
 @pytest.fixture(autouse=True)

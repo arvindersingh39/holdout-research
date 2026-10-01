@@ -32,8 +32,11 @@ def test_valid_output(ctx: CallContext, fake: FakeLLM) -> None:
     assert len(rows) == 1
     r = rows[0]
     assert (r.role, r.model, r.milestone_id, r.ok) == (
-        "long_planner", "anthropic/claude-opus-5-5", "M1", True,
-    )  # fmt: skip
+        "long_planner",
+        "anthropic/claude-opus-5-5",
+        "M1",
+        True,
+    )
     assert r.input_tokens > 0 and r.output_tokens > 0 and r.cost_usd > 0
 
 
@@ -100,8 +103,9 @@ def test_budget_exceeded_before_any_call(ctx: CallContext, fake: FakeLLM) -> Non
 def test_budget_counts_prior_spend(ctx: CallContext, fake: FakeLLM) -> None:
     from r2r.store.ledger import CallRecord
 
-    ctx.ledger.record(CallRecord(run_id="run-test", milestone_id="M1", role="coder",
-                                 model="x/y", cost_usd=2.9999))  # fmt: skip
+    ctx.ledger.record(
+        CallRecord(run_id="run-test", milestone_id="M1", role="coder", model="x/y", cost_usd=2.9999)
+    )
     fake.script("long_planner", roadmap())
     with pytest.raises(BudgetExceeded, match="milestone"):
         _call(ctx)
@@ -153,8 +157,9 @@ def test_model_override_limited_to_escalation(ctx: CallContext, fake: FakeLLM) -
     from samples import milestone_spec
 
     fake.script("coder", roadmap())
-    out = call_structured("coder", "coder", milestone_spec(), Roadmap, ctx,
-                          model="anthropic/claude-opus-5-5")  # fmt: skip
+    out = call_structured(
+        "coder", "coder", milestone_spec(), Roadmap, ctx, model="anthropic/claude-opus-5-5"
+    )
     assert out.version == 1
     assert fake.calls[0].model == "anthropic/claude-opus-5-5"
     with pytest.raises(ValueError, match="not configured"):
@@ -182,8 +187,11 @@ def test_embed_local_model_is_ledgered_at_zero_cost(ctx: CallContext, fake: Fake
     assert fake.embed_calls == [("local/all-MiniLM-L6-v2", 2)]
     (row,) = ctx.ledger.rows("run-test")
     assert (row.role, row.model, row.cost_usd, row.ok) == (
-        "embeddings", "local/all-MiniLM-L6-v2", 0.0, True,
-    )  # fmt: skip
+        "embeddings",
+        "local/all-MiniLM-L6-v2",
+        0.0,
+        True,
+    )
     assert row.input_tokens > 0
 
 
@@ -206,8 +214,9 @@ def test_embed_batches(ctx: CallContext, fake: FakeLLM) -> None:
 def test_fake_embeddings_are_lexical(fake: FakeLLM) -> None:
     import math
 
-    a, b, c = fake.embed("local/x", ["option pricing monte carlo", "monte carlo option",
-                                     "protein folding"]).vectors  # fmt: skip
+    a, b, c = fake.embed(
+        "local/x", ["option pricing monte carlo", "monte carlo option", "protein folding"]
+    ).vectors
 
     def cos(u, v):
         return sum(x * y for x, y in zip(u, v, strict=True)) / (

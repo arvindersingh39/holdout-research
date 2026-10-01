@@ -41,8 +41,11 @@ def test_logger_output_is_json_and_redacted() -> None:
     stream = io.StringIO()
     configure_logging(level="INFO", secrets=secrets, stream=stream)
     log = get_logger("r2r.test")
-    log.info("calling with key %s", "sk-ant-REALKEY-0123456789", extra={"role": "coder",
-             "header": "x-api-key: sk-ant-REALKEY-0123456789"})  # fmt: skip
+    log.info(
+        "calling with key %s",
+        "sk-ant-REALKEY-0123456789",
+        extra={"role": "coder", "header": "x-api-key: sk-ant-REALKEY-0123456789"},
+    )
     line = stream.getvalue().strip().splitlines()[-1]
     rec = json.loads(line)
     assert rec["level"] == "INFO"
@@ -53,7 +56,8 @@ def test_logger_output_is_json_and_redacted() -> None:
 
 def test_filter_handles_exceptions() -> None:
     f = RedactingFilter(["supersecretvalue1"])
-    record = logging.LogRecord("r2r", logging.ERROR, __file__, 1, "boom %s", ("supersecretvalue1",),
-                               None)  # fmt: skip
+    record = logging.LogRecord(
+        "r2r", logging.ERROR, __file__, 1, "boom %s", ("supersecretvalue1",), None
+    )
     assert f.filter(record)
     assert "supersecretvalue1" not in record.getMessage()

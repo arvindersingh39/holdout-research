@@ -23,12 +23,21 @@ def _boom(_: NoArgs) -> str:
 
 
 TOOLS = [
-    Tool(name="add", description="Add two integers.", input_model=AddArgs,
-         handler=lambda x: str(x.a + x.b)),
-    Tool(name="big", description="Return a lot of text.", input_model=NoArgs,
-         handler=lambda _: "x" * 10_000, max_output_chars=100),
+    Tool(
+        name="add",
+        description="Add two integers.",
+        input_model=AddArgs,
+        handler=lambda x: str(x.a + x.b),
+    ),
+    Tool(
+        name="big",
+        description="Return a lot of text.",
+        input_model=NoArgs,
+        handler=lambda _: "x" * 10_000,
+        max_output_chars=100,
+    ),
     Tool(name="boom", description="Always fails.", input_model=NoArgs, handler=_boom),
-]  # fmt: skip
+]
 
 
 def _loop(ctx: CallContext, max_turns: int = 5, stop_fn=lambda s: False):

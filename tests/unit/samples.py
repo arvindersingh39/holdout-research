@@ -78,9 +78,11 @@ def research_brief() -> ResearchBrief:
 
 def milestone(i: int = 1, depends_on: list[str] | None = None) -> Milestone:
     return Milestone(
-        id=f"M{i}", title=f"milestone {i}", acceptance_criteria=[criterion(1)],
+        id=f"M{i}",
+        title=f"milestone {i}",
+        acceptance_criteria=[criterion(1)],
         depends_on=depends_on or [],
-    )  # fmt: skip
+    )
 
 
 def roadmap() -> Roadmap:
@@ -111,9 +113,12 @@ def milestone_spec() -> MilestoneSpec:
 
 def coordinator_verdict() -> CoordinatorVerdict:
     return CoordinatorVerdict(
-        created_by="coordinator", run_id=RUN, milestone_id="M1", verdict="revise",
+        created_by="coordinator",
+        run_id=RUN,
+        milestone_id="M1",
+        verdict="revise",
         issues=[Issue(target="spec", severity="high", text="Units missing for sigma.")],
-    )  # fmt: skip
+    )
 
 
 def math_spec() -> MathSpec:
@@ -132,51 +137,94 @@ def math_spec() -> MathSpec:
 
 def math_design() -> MathDesign:
     return MathDesign(
-        created_by="math_designer", run_id=RUN, milestone_id="M1", spec=math_spec(),
-        files=[FileSpec(path="tests/frozen/test_bs.py", purpose="test", content="def test(): ..."),
-               FileSpec(path="bench/run.py", purpose="bench", content="print('bench')")],
-    )  # fmt: skip
+        created_by="math_designer",
+        run_id=RUN,
+        milestone_id="M1",
+        spec=math_spec(),
+        files=[
+            FileSpec(path="tests/frozen/test_bs.py", purpose="test", content="def test(): ..."),
+            FileSpec(path="bench/run.py", purpose="bench", content="print('bench')"),
+        ],
+    )
 
 
 def make_test_result() -> TestResult:
     return TestResult(
-        created_by="harness", run_id=RUN, milestone_id="M1", passed=False, n_passed=3,
-        n_failed=1, frozen_ok=True, duration_s=1.5,
-        failures=[Failure(test_id="test_bs::test_atm", criterion_id="AC1",
-                          message="assert 10.4 == 10.45", tail="E   assert 10.4 == 10.45")],
-    )  # fmt: skip
+        created_by="harness",
+        run_id=RUN,
+        milestone_id="M1",
+        passed=False,
+        n_passed=3,
+        n_failed=1,
+        frozen_ok=True,
+        duration_s=1.5,
+        failures=[
+            Failure(
+                test_id="test_bs::test_atm",
+                criterion_id="AC1",
+                message="assert 10.4 == 10.45",
+                tail="E   assert 10.4 == 10.45",
+            )
+        ],
+    )
 
 
 def profile_report() -> ProfileReport:
     return ProfileReport(
-        created_by="harness", run_id=RUN, milestone_id="M1", total_s=2.0,
-        hotspots=[Hotspot(qualname="mc.price", file="src/mc.py", line_start=10, line_end=40,
-                          cum_s=1.8, pct=90.0)],
-    )  # fmt: skip
+        created_by="harness",
+        run_id=RUN,
+        milestone_id="M1",
+        total_s=2.0,
+        hotspots=[
+            Hotspot(
+                qualname="mc.price",
+                file="src/mc.py",
+                line_start=10,
+                line_end=40,
+                cum_s=1.8,
+                pct=90.0,
+            )
+        ],
+    )
 
 
 def optimization_patch() -> OptimizationPatch:
     return OptimizationPatch(
-        created_by="optimizer", run_id=RUN, milestone_id="M1",
+        created_by="optimizer",
+        run_id=RUN,
+        milestone_id="M1",
         diff="--- a/src/mc.py\n+++ b/src/mc.py\n@@ -1 +1 @@\n-x\n+y\n",
-        technique="vectorize", rationale="Replace the Python loop with numpy.",
-    )  # fmt: skip
+        technique="vectorize",
+        rationale="Replace the Python loop with numpy.",
+    )
 
 
 def optimization_outcome() -> OptimizationOutcome:
     return OptimizationOutcome(
-        created_by="harness", run_id=RUN, milestone_id="M1", attempt=1, accepted=True,
-        reason="12% faster, tests green", runtime_before_s=1.0, runtime_after_s=0.88,
-        sloc_before=120, sloc_after=118,
-    )  # fmt: skip
+        created_by="harness",
+        run_id=RUN,
+        milestone_id="M1",
+        attempt=1,
+        accepted=True,
+        reason="12% faster, tests green",
+        runtime_before_s=1.0,
+        runtime_after_s=0.88,
+        sloc_before=120,
+        sloc_after=118,
+    )
 
 
 def result_digest() -> ResultDigest:
     return ResultDigest(
-        created_by="digest", run_id=RUN, milestone_id="M1", status="met",
+        created_by="digest",
+        run_id=RUN,
+        milestone_id="M1",
+        status="met",
         criteria=[CriterionResult(id="AC1", passed=True, evidence="all 12 tests pass")],
-        metrics={"runtime_s": 0.41}, cost_usd=0.42, tokens=12000,
-    )  # fmt: skip
+        metrics={"runtime_s": 0.41},
+        cost_usd=0.42,
+        tokens=12000,
+    )
 
 
 def human_decision() -> HumanDecision:
@@ -185,13 +233,29 @@ def human_decision() -> HumanDecision:
 
 def publication_bundle() -> PublicationBundle:
     return PublicationBundle(
-        created_by="writer", **META, mode="paper", artifacts=[blob_ref(3, "figure")],
-        build_ok=True, log_tail="Output written on paper.pdf",
-    )  # fmt: skip
+        created_by="writer",
+        **META,
+        mode="paper",
+        artifacts=[blob_ref(3, "figure")],
+        build_ok=True,
+        log_tail="Output written on paper.pdf",
+    )
 
 
 ALL_SAMPLES = [
-    proposal, paper_card, research_brief, roadmap, milestone_spec, coordinator_verdict,
-    math_spec, math_design, make_test_result, profile_report, optimization_patch,
-    optimization_outcome, result_digest, human_decision, publication_bundle,
-]  # fmt: skip
+    proposal,
+    paper_card,
+    research_brief,
+    roadmap,
+    milestone_spec,
+    coordinator_verdict,
+    math_spec,
+    math_design,
+    make_test_result,
+    profile_report,
+    optimization_patch,
+    optimization_outcome,
+    result_digest,
+    human_decision,
+    publication_bundle,
+]

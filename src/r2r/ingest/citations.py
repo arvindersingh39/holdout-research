@@ -7,8 +7,13 @@ import re
 from r2r.contracts import Citation, PaperCard
 
 _SPECIALS = re.compile(r"([&%$#_{}])")
-_VENUE_FIELD = {"article": "journal", "inproceedings": "booktitle", "book": "publisher",
-                "techreport": "institution", "phdthesis": "school"}  # fmt: skip
+_VENUE_FIELD = {
+    "article": "journal",
+    "inproceedings": "booktitle",
+    "book": "publisher",
+    "techreport": "institution",
+    "phdthesis": "school",
+}
 
 
 def _escape(text: str) -> str:

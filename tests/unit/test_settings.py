@@ -33,7 +33,7 @@ def test_repo_config_loads() -> None:
     assert s.models.roles["coder"].escalate_to == "anthropic/claude-opus-5-5"
     assert s.models.roles["long_planner"].thinking_budget == 4000
     assert s.budgets.usd_cap_run == 20.0
-    assert s.budgets.sandbox.memory == "4g"
+    assert s.budgets.sandbox.memory == "2g"  # D25
     assert s.budgets.gates.channel == "whatsapp"
     assert s.budgets.contract_token_caps["Roadmap"] == 2000
     assert s.budgets.ingest.chunk_tokens == 800

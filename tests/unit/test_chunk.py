@@ -14,8 +14,11 @@ def _doc(sections: int = 3, paras: int = 12, words: int = 60) -> str:
     for s in range(sections):
         out.append(f"## Section {s}")
         for p in range(paras):
-            out.append(" ".join(f"s{s}p{p}w{w}." if w % 12 == 11 else f"s{s}p{p}w{w}"
-                                for w in range(words)))  # fmt: skip
+            out.append(
+                " ".join(
+                    f"s{s}p{p}w{w}." if w % 12 == 11 else f"s{s}p{p}w{w}" for w in range(words)
+                )
+            )
     return "\n\n".join(out)
 
 
@@ -63,10 +66,13 @@ def test_empty_text() -> None:
 
 @settings(max_examples=40, deadline=None)
 @given(
-    st.lists(st.lists(st.from_regex(r"[a-z]{1,8}", fullmatch=True), min_size=1, max_size=40),
-             min_size=1, max_size=30),
+    st.lists(
+        st.lists(st.from_regex(r"[a-z]{1,8}", fullmatch=True), min_size=1, max_size=40),
+        min_size=1,
+        max_size=30,
+    ),
     st.integers(min_value=20, max_value=300),
-)  # fmt: skip
+)
 def test_every_paragraph_is_covered(paras: list[list[str]], target: int) -> None:
     text = "\n\n".join(" ".join(words) + "." for words in paras)
     joined = "\n".join(c.text for c in chunk_text(text, target, target // 5))

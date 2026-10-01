@@ -21,6 +21,15 @@ class RunPaths:
         return self.root / "workspace"
 
     @property
+    def workspace_git(self) -> Path:
+        """The workspace's git dir, outside the workspace so generated code can't touch it."""
+        return self.root / "workspace.git"
+
+    @property
+    def frozen_manifest(self) -> Path:
+        return self.root / "frozen.json"
+
+    @property
     def blobs(self) -> Path:
         return self.root / "blobs"
 

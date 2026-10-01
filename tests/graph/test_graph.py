@@ -158,10 +158,20 @@ def test_status_in_subprocess(tmp_path: Path, fake: FakeLLM) -> None:
     fake.script("long_planner", ROADMAP)
     _run(tmp_path, fake, FakeChannel(None))
     out = subprocess.run(
-        [sys.executable, "-c", "from r2r.cli import app; app()", "status", "g",
-         "--runs-base", str(tmp_path)],
-        capture_output=True, text=True, cwd=REPO, timeout=120,
-    )  # fmt: skip
+        [
+            sys.executable,
+            "-c",
+            "from r2r.cli import app; app()",
+            "status",
+            "g",
+            "--runs-base",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
+        timeout=120,
+    )
     assert out.returncode == 0, out.stderr
     assert "roadmap" in out.stdout.lower()
     assert "Waiting at gate" in out.stdout

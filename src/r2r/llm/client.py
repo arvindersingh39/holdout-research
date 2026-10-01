@@ -74,8 +74,11 @@ class LLMClient(Protocol):
         ...
 
 
-_KEY_FIELD = {"anthropic": "anthropic_api_key", "gemini": "gemini_api_key",
-              "openrouter": "openrouter_api_key"}  # fmt: skip
+_KEY_FIELD = {
+    "anthropic": "anthropic_api_key",
+    "gemini": "gemini_api_key",
+    "openrouter": "openrouter_api_key",
+}
 
 
 LOCAL_EMBEDDERS = {"local/all-MiniLM-L6-v2"}
@@ -106,9 +109,12 @@ class LiteLLMClient:
             if (value := getattr(req, name)) is not None:
                 kwargs[name] = value
         transient = (
-            litellm.RateLimitError, litellm.InternalServerError, litellm.ServiceUnavailableError,
-            litellm.APIConnectionError, litellm.Timeout,
-        )  # fmt: skip
+            litellm.RateLimitError,
+            litellm.InternalServerError,
+            litellm.ServiceUnavailableError,
+            litellm.APIConnectionError,
+            litellm.Timeout,
+        )
         start = time.monotonic()
         try:
             resp = litellm.completion(**kwargs)

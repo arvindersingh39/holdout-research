@@ -16,8 +16,9 @@ def make_paper(path: Path, pages: int = 3, injection: bool = True) -> Path:
         page.insert_text((72, 40), HEADER, fontsize=9)
         y = 90
         if n == 1:
-            page.insert_text((72, y), "Variance Reduction for Option Pricing", fontsize=18,
-                             fontname="hebo")  # fmt: skip
+            page.insert_text(
+                (72, y), "Variance Reduction for Option Pricing", fontsize=18, fontname="hebo"
+            )
             y += 40
         page.insert_text((72, y), f"{n}. Section {n}", fontsize=14, fontname="hebo")
         y += 28

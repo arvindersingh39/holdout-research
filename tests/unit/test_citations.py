@@ -24,8 +24,13 @@ def test_basic_entry() -> None:
 
 
 def test_escaping_and_venue_field() -> None:
-    card = _card(entry_type="article", title="Risk & Return: 5% of $ #1_x",
-                 authors=["A. One", "B. Two"], venue="J. Fin. & Econ.", doi="10.1/x")  # fmt: skip
+    card = _card(
+        entry_type="article",
+        title="Risk & Return: 5% of $ #1_x",
+        authors=["A. One", "B. Two"],
+        venue="J. Fin. & Econ.",
+        doi="10.1/x",
+    )
     bib = to_bibtex([card])
     assert r"Risk \& Return: 5\% of \$ \#1\_x" in bib
     assert "author = {A. One and B. Two}" in bib

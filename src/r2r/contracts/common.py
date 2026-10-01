@@ -10,9 +10,18 @@ from pydantic import AfterValidator, Field, NonNegativeFloat, NonNegativeInt, Po
 from r2r.contracts.base import CriterionId, Lines, Part, Text
 
 BlobKind = Literal[
-    "proposal", "paper", "paper_text", "chunk", "code", "log", "figure", "bib", "contract",
-    "diff", "other",
-]  # fmt: skip
+    "proposal",
+    "paper",
+    "paper_text",
+    "chunk",
+    "code",
+    "log",
+    "figure",
+    "bib",
+    "contract",
+    "diff",
+    "other",
+]
 
 
 def _workspace_path(v: str) -> str:

@@ -28,10 +28,14 @@ PASS = CoordinatorVerdict.model_validate(
     {**coordinator_verdict().model_dump(), "verdict": "pass", "issues": []}
 )
 REVISE = coordinator_verdict()
-REVISE_ROADMAP = CoordinatorVerdict.model_validate({
-    **REVISE.model_dump(),
-    "issues": [Issue(target="roadmap", severity="high", text="R2: M1 is too big.").model_dump()],
-})  # fmt: skip
+REVISE_ROADMAP = CoordinatorVerdict.model_validate(
+    {
+        **REVISE.model_dump(),
+        "issues": [
+            Issue(target="roadmap", severity="high", text="R2: M1 is too big.").model_dump()
+        ],
+    }
+)
 
 
 class FakeChannel:
@@ -59,7 +63,15 @@ def decide(action: str, **kw) -> HumanDecision:
 def make_deps(tmp_path: Path, fake: FakeLLM, run_id: str = "g", create: bool = True) -> RunDeps:
     settings = load_settings(REPO / "config", env_file=None)
     if create:
-        return RunDeps.create(run_id, PILOT, settings, fake, runs_base=tmp_path,
-                              prompts_dir=REPO / "prompts", retry_wait_max_s=0)  # fmt: skip
-    return RunDeps.load(run_id, settings, fake, runs_base=tmp_path,
-                        prompts_dir=REPO / "prompts", retry_wait_max_s=0)  # fmt: skip
+        return RunDeps.create(
+            run_id,
+            PILOT,
+            settings,
+            fake,
+            runs_base=tmp_path,
+            prompts_dir=REPO / "prompts",
+            retry_wait_max_s=0,
+        )
+    return RunDeps.load(
+        run_id, settings, fake, runs_base=tmp_path, prompts_dir=REPO / "prompts", retry_wait_max_s=0
+    )

@@ -10,9 +10,19 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 from r2r.llm.tokens import estimate_tokens
 
 Role = Literal[
-    "retriever", "long_planner", "short_planner", "coordinator", "math_designer", "coder",
-    "optimizer", "digest", "writer", "harness", "human", "cli",
-]  # fmt: skip
+    "retriever",
+    "long_planner",
+    "short_planner",
+    "coordinator",
+    "math_designer",
+    "coder",
+    "optimizer",
+    "digest",
+    "writer",
+    "harness",
+    "human",
+    "cli",
+]
 
 Id = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")]
 MilestoneId = Annotated[str, Field(pattern=r"^M\d{1,3}$")]

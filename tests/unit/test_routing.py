@@ -32,8 +32,10 @@ def test_next_milestone_respects_status_and_dependencies() -> None:
 
 
 def test_next_milestone_skips_blocked() -> None:
-    rm = _rm(current_milestone_id=None,
-             milestones=[milestone(1, ["M2"]).model_dump(), milestone(2).model_dump()])  # fmt: skip
+    rm = _rm(
+        current_milestone_id=None,
+        milestones=[milestone(1, ["M2"]).model_dump(), milestone(2).model_dump()],
+    )
     assert next_milestone(rm).id == "M2"
 
 
@@ -66,10 +68,14 @@ def test_route_after_coordinator() -> None:
         {**coordinator_verdict().model_dump(), "verdict": "pass", "issues": []}
     )
     revise = coordinator_verdict()  # one issue targeting the spec
-    on_roadmap = CoordinatorVerdict.model_validate({
-        **revise.model_dump(),
-        "issues": [Issue(target="roadmap", severity="high", text="M1 is too big.").model_dump()],
-    })  # fmt: skip
+    on_roadmap = CoordinatorVerdict.model_validate(
+        {
+            **revise.model_dump(),
+            "issues": [
+                Issue(target="roadmap", severity="high", text="M1 is too big.").model_dump()
+            ],
+        }
+    )
     assert route_after_coordinator(passed, rounds=0, max_rounds=2) == "build"
     assert route_after_coordinator(passed, rounds=2, max_rounds=2) == "build"
     assert route_after_coordinator(revise, rounds=1, max_rounds=2) == "short_plan"

@@ -39,7 +39,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not docker'"
+addopts = "-m 'not docker' --ignore=tests/fixtures"
 markers = [
     "docker: needs a running Docker daemon (run with -m docker)",
     "live: calls a paid LLM API; needs R2R_LIVE=1 and owner approval",
@@ -48,6 +48,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["tests/fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]

@@ -10,9 +10,20 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeFloat, NonNegativeInt
 
 _COLUMNS = (
-    "ts", "run_id", "milestone_id", "role", "model", "input_tokens", "output_tokens",
-    "cache_read_tokens", "cache_write_tokens", "cost_usd", "latency_ms", "ok", "error",
-)  # fmt: skip
+    "ts",
+    "run_id",
+    "milestone_id",
+    "role",
+    "model",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cost_usd",
+    "latency_ms",
+    "ok",
+    "error",
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS llm_calls (

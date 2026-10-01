@@ -90,20 +90,39 @@ def call_structured[C: BaseModel](
     native = ctx.client.supports_response_schema(model)
     tool_name = "submit_" + re.sub(r"(?<!^)(?=[A-Z])", "_", output_model.__name__).lower()
     structured: dict[str, Any] = (
-        {"response_format": {"type": "json_schema",
-                             "json_schema": {"name": output_model.__name__, "schema": schema}}}
+        {
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": output_model.__name__, "schema": schema},
+            }
+        }
         if native
-        else {"tools": [{"type": "function", "function": {
-                  "name": tool_name, "description": f"Submit the {output_model.__name__}.",
-                  "parameters": schema}}],
-              "tool_choice": {"type": "function", "function": {"name": tool_name}}}
-    )  # fmt: skip
+        else {
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": f"Submit the {output_model.__name__}.",
+                        "parameters": schema,
+                    },
+                }
+            ],
+            "tool_choice": {"type": "function", "function": {"name": tool_name}},
+        }
+    )
     meta = {"created_by": role, "run_id": ctx.run_id, "milestone_id": ctx.milestone_id}
 
     error = ""
     for attempt in (1, 2):
-        req = LLMRequest(role=role, model=model, messages=list(messages), max_tokens=max_out,
-                         thinking=thinking, **structured)  # fmt: skip
+        req = LLMRequest(
+            role=role,
+            model=model,
+            messages=list(messages),
+            max_tokens=max_out,
+            thinking=thinking,
+            **structured,
+        )
         raw = _raw_output(_invoke(req, ctx), native)
         try:
             return _parse(raw, output_model, meta, model)
@@ -140,19 +159,33 @@ def run_tool_loop(
     state = ToolLoopState()
 
     while state.turns < max_turns:
-        req = LLMRequest(role=role, model=model, messages=list(messages), max_tokens=max_out,
-                         tools=schemas, tool_choice="auto", thinking=thinking)  # fmt: skip
+        req = LLMRequest(
+            role=role,
+            model=model,
+            messages=list(messages),
+            max_tokens=max_out,
+            tools=schemas,
+            tool_choice="auto",
+            thinking=thinking,
+        )
         resp = _invoke(req, ctx)
         state.turns += 1
         if not resp.tool_calls:
             return ToolLoopResult(state.turns, "no_tool_calls", resp.text, state)
-        messages.append({
-            "role": "assistant",
-            "content": resp.text,
-            "tool_calls": [{"id": c.id, "type": "function",
-                            "function": {"name": c.name, "arguments": c.arguments}}
-                           for c in resp.tool_calls],
-        })  # fmt: skip
+        messages.append(
+            {
+                "role": "assistant",
+                "content": resp.text,
+                "tool_calls": [
+                    {
+                        "id": c.id,
+                        "type": "function",
+                        "function": {"name": c.name, "arguments": c.arguments},
+                    }
+                    for c in resp.tool_calls
+                ],
+            }
+        )
         state.last_results = [dispatch(c, by_name) for c in resp.tool_calls]
         messages += [
             {"role": "tool", "tool_call_id": r.call_id, "content": r.output}
@@ -224,8 +257,9 @@ def _attempt(req: LLMRequest, prices: tuple[float, float], ctx: CallContext) -> 
         resp = ctx.client.complete(req)
     except LLMCallError as e:
         _record(ctx, req, ok=False, error=str(e)[:500])
-        log.warning("llm call failed", extra={"role": req.role, "model": req.model,
-                                              "error": str(e)[:300]})  # fmt: skip
+        log.warning(
+            "llm call failed", extra={"role": req.role, "model": req.model, "error": str(e)[:300]}
+        )
         raise
     override = ctx.settings.models.price_overrides.get(req.model)
     if override is not None or resp.cost_usd is None:
@@ -233,9 +267,17 @@ def _attempt(req: LLMRequest, prices: tuple[float, float], ctx: CallContext) -> 
     else:
         cost = resp.cost_usd
     _record(ctx, req, resp=resp, cost=cost)
-    log.info("llm call", extra={"role": req.role, "model": req.model, "in": resp.input_tokens,
-                                "out": resp.output_tokens, "cache_read": resp.cache_read_tokens,
-                                "cost_usd": round(cost, 6)})  # fmt: skip
+    log.info(
+        "llm call",
+        extra={
+            "role": req.role,
+            "model": req.model,
+            "in": resp.input_tokens,
+            "out": resp.output_tokens,
+            "cache_read": resp.cache_read_tokens,
+            "cost_usd": round(cost, 6),
+        },
+    )
     return resp
 
 
@@ -247,14 +289,22 @@ def _record(
     ok: bool = True,
     error: str | None = None,
 ) -> None:
-    ctx.ledger.record(CallRecord(
-        run_id=ctx.run_id, milestone_id=ctx.milestone_id, role=req.role, model=req.model,
-        input_tokens=resp.input_tokens if resp else 0,
-        output_tokens=resp.output_tokens if resp else 0,
-        cache_read_tokens=resp.cache_read_tokens if resp else 0,
-        cache_write_tokens=resp.cache_write_tokens if resp else 0,
-        cost_usd=cost, latency_ms=resp.latency_ms if resp else 0, ok=ok, error=error,
-    ))  # fmt: skip
+    ctx.ledger.record(
+        CallRecord(
+            run_id=ctx.run_id,
+            milestone_id=ctx.milestone_id,
+            role=req.role,
+            model=req.model,
+            input_tokens=resp.input_tokens if resp else 0,
+            output_tokens=resp.output_tokens if resp else 0,
+            cache_read_tokens=resp.cache_read_tokens if resp else 0,
+            cache_write_tokens=resp.cache_write_tokens if resp else 0,
+            cost_usd=cost,
+            latency_ms=resp.latency_ms if resp else 0,
+            ok=ok,
+            error=error,
+        )
+    )
 
 
 def _prices(model: str, ctx: CallContext) -> tuple[float, float]:
@@ -302,8 +352,9 @@ def _output_limit(cfg: RoleConfig) -> tuple[int, dict[str, Any] | None]:
     """Anthropic requires max_tokens > thinking budget, so thinking is added on top."""
     if cfg.thinking_budget:
         return cfg.max_tokens + cfg.thinking_budget, {
-            "type": "enabled", "budget_tokens": cfg.thinking_budget,
-        }  # fmt: skip
+            "type": "enabled",
+            "budget_tokens": cfg.thinking_budget,
+        }
     return cfg.max_tokens, None
 
 
@@ -383,6 +434,13 @@ def _describe(e: Exception) -> str:
 
 
 __all__ = [
-    "EMBED_BATCH", "BudgetExceeded", "CallContext", "ContractViolation", "LLMCallError",
-    "TransientLLMError", "call_structured", "embed", "run_tool_loop",
-]  # fmt: skip
+    "EMBED_BATCH",
+    "BudgetExceeded",
+    "CallContext",
+    "ContractViolation",
+    "LLMCallError",
+    "TransientLLMError",
+    "call_structured",
+    "embed",
+    "run_tool_loop",
+]

@@ -47,8 +47,9 @@ class RedactingFilter(logging.Filter):
             if key not in _STD_ATTRS and isinstance(value, str):
                 setattr(record, key, redact(value, self.secrets))
         if record.exc_info:
-            record.exc_text = redact(logging.Formatter().formatException(record.exc_info),
-                                     self.secrets)  # fmt: skip
+            record.exc_text = redact(
+                logging.Formatter().formatException(record.exc_info), self.secrets
+            )
             record.exc_info = None
         return True
 
