@@ -66,6 +66,10 @@ class LLMRequest:
 class LLMClient(Protocol):
     def complete(self, req: LLMRequest) -> LLMResponse: ...
 
+    def _trace(self, req: LLMRequest, resp: LLMResponse | None, error: str | None = None) -> None:
+        if self._tracer is not None:
+            self._tracer.record(req, resp, error)
+
     def embed(self, model: str, texts: list[str]) -> EmbedResponse: ...
 
     def supports_response_schema(self, model: str) -> bool: ...
@@ -89,7 +93,10 @@ class LiteLLMClient:
     def __init__(self, secrets: Secrets) -> None:
         self._secrets = secrets
         self._local_embedder: Any = None
-        self.tracing = _enable_langfuse(secrets)
+        from r2r.llm.tracing import Tracer
+
+        self._tracer = Tracer.from_secrets(secrets)
+        self.tracing = self._tracer is not None
 
     def _api_key(self, model: str) -> str | None:
         field_name = _KEY_FIELD.get(model.split("/", 1)[0])
@@ -107,8 +114,6 @@ class LiteLLMClient:
             "api_key": self._api_key(req.model),
             **req.extra,
         }
-        if self.tracing and req.metadata:
-            kwargs["metadata"] = req.metadata
         for name in ("response_format", "tools", "tool_choice", "thinking"):
             if (value := getattr(req, name)) is not None:
                 kwargs[name] = value
@@ -123,8 +128,10 @@ class LiteLLMClient:
         try:
             resp = litellm.completion(**kwargs)
         except transient as e:
+            self._trace(req, None, _short(e))
             raise TransientLLMError(_short(e)) from None
         except Exception as e:
+            self._trace(req, None, _short(e))
             raise LLMCallError(_short(e)) from None
         latency = int((time.monotonic() - start) * 1000)
 
@@ -138,7 +145,7 @@ class LiteLLMClient:
             cost = float(litellm.completion_cost(completion_response=resp))
         except Exception:
             cost = None
-        return LLMResponse(
+        out = LLMResponse(
             model=req.model,
             text=msg.content,
             tool_calls=[
@@ -156,6 +163,8 @@ class LiteLLMClient:
             )
             or 0,
         )
+        self._trace(req, out)
+        return out
 
     def embed(self, model: str, texts: list[str]) -> EmbedResponse:
         if model.startswith("local/"):
@@ -208,25 +217,6 @@ class LiteLLMClient:
         if not inp or not out:  # a 0 price is LiteLLM's "unknown", not "free"
             return None
         return float(inp), float(out)
-
-
-def _enable_langfuse(secrets: Secrets) -> bool:
-    """D47: trace through LiteLLM's OpenTelemetry Langfuse callback, only when all three keys
-    exist. Keys go into this host process's environment only; sandboxes never inherit it."""
-    pk, sk, host = secrets.langfuse_public_key, secrets.langfuse_secret_key, secrets.langfuse_host
-    if not (pk and sk and host):
-        return False
-    import os
-
-    import litellm
-
-    os.environ["LANGFUSE_PUBLIC_KEY"] = pk.get_secret_value()
-    os.environ["LANGFUSE_SECRET_KEY"] = sk.get_secret_value()
-    os.environ["LANGFUSE_HOST"] = host
-    os.environ["LANGFUSE_OTEL_HOST"] = host
-    if "langfuse_otel" not in litellm.callbacks:
-        litellm.callbacks = [*litellm.callbacks, "langfuse_otel"]
-    return True
 
 
 def _short(e: Exception) -> str:
