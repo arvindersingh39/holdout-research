@@ -189,3 +189,34 @@ def test_every_cap_names_a_contract() -> None:
     for name in load_settings().budgets.contract_token_caps:
         cls = getattr(c, name)
         assert isinstance(cls, type) and issubclass(cls, BaseModel), name
+
+
+def test_baseline_card() -> None:
+    from r2r.contracts import BaselineCard
+
+    card = BaselineCard(
+        created_by="scout",
+        run_id="r",
+        milestone_id="M1",
+        criterion_id="AC1",
+        claim="ATM call price",
+        value=10.4506,
+        units="USD",
+        precision="4 dp",
+        source_url="https://example.org/bs",
+        source_title="BS table",
+        quote="the call price is 10.4506",
+        license_note="",
+        verified=True,
+    )
+    assert BaselineCard.model_validate_json(card.model_dump_json()) == card
+    with pytest.raises(ValidationError):
+        BaselineCard.model_validate({**card.model_dump(), "quote": "x" * 401})
+    with pytest.raises(ValidationError):
+        BaselineCard.model_validate({**card.model_dump(), "source_url": "ftp://nope"})
+
+
+def test_file_spec_reference_purpose() -> None:
+    from r2r.contracts import FileSpec
+
+    assert FileSpec(path="src/pkg/core.py", purpose="reference", content="x").purpose == "reference"

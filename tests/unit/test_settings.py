@@ -39,6 +39,11 @@ def test_repo_config_loads() -> None:
     assert s.budgets.ingest.chunk_tokens == 800
     assert s.budgets.ingest.chunk_overlap_tokens == 100
     assert s.budgets.ingest.paper_card_input_tokens == 12000
+    assert s.budgets.baselines.enabled and s.budgets.baselines.max_queries == 4
+    assert s.budgets.baselines.max_pages == 6 and s.budgets.baselines.page_tokens == 4000
+    assert (s.budgets.context_pack.k, s.budgets.context_pack.max_refs) == (8, 5)
+    assert s.budgets.context_pack.ref_summary_chars == 100
+    assert s.models.roles["scout"].thinking_budget == 1024
     assert [c.id for c in s.rubric.criteria] == ["R1", "R2", "R3", "R4", "R5"]
 
 
@@ -66,6 +71,8 @@ def test_missing_file_rejected(config_dir: Path) -> None:
         ("budgets.yaml", lambda d: d["sandbox"].update(memory="lots")),
         ("budgets.yaml", lambda d: d["ingest"].update(chunk_overlap_tokens=800)),
         ("budgets.yaml", lambda d: d["ingest"].update(chunk_tokens=0)),
+        ("budgets.yaml", lambda d: d["baselines"].update(max_queries=0)),
+        ("budgets.yaml", lambda d: d["context_pack"].update(ref_summary_chars=500)),
         ("models.yaml", lambda d: d["roles"].pop("coder")),
         ("models.yaml", lambda d: d["roles"].update(stranger={"model": "x/y", "max_tokens": 1})),
         ("models.yaml", lambda d: d["roles"]["writer"].update(max_tokens=0)),

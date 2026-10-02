@@ -13,6 +13,7 @@ from r2r.contracts.common import BlobKind, BlobRef, Criterion, Failure, FileSpec
 from r2r.contracts.harness import OptimizationOutcome, OptimizationPatch, ProfileReport, TestResult
 from r2r.contracts.math import BenchSpec, MathDesign, MathSpec
 from r2r.contracts.planning import (
+    BaselineCard,
     Citation,
     CoordinatorVerdict,
     Milestone,
@@ -25,6 +26,7 @@ from r2r.contracts.planning import (
 from r2r.contracts.results import CriterionResult, HumanDecision, PublicationBundle, ResultDigest
 
 __all__ = [
+    "BaselineCard",
     "BenchSpec",
     "BlobKind",
     "BlobRef",

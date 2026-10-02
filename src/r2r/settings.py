@@ -31,6 +31,7 @@ ROLES = (
     "optimizer",
     "digest",
     "writer",
+    "scout",
 )
 
 DEFAULT_CONFIG_DIR = Path("config")
@@ -106,6 +107,19 @@ class IngestLimits(_Strict):
         return self
 
 
+class ContextPackLimits(_Strict):
+    k: PositiveInt  # chunks retrieved per query
+    max_refs: PositiveInt  # context refs kept in a MilestoneSpec
+    ref_summary_chars: Annotated[int, Field(ge=20, le=300)]
+
+
+class BaselineLimits(_Strict):
+    enabled: bool
+    max_queries: PositiveInt
+    max_pages: PositiveInt
+    page_tokens: PositiveInt
+
+
 class ContextPackTokens(_Strict):
     short_planner: PositiveInt
     math_designer: PositiveInt
@@ -144,6 +158,8 @@ class BudgetsConfig(_Strict):
     sandbox: SandboxLimits
     ingest: IngestLimits
     context_pack_tokens: ContextPackTokens
+    context_pack: ContextPackLimits
+    baselines: BaselineLimits
     gates: GatesConfig
     contract_token_caps: dict[str, PositiveInt]
 
@@ -182,6 +198,7 @@ class Secrets(BaseModel):
     langfuse_host: str | None = None
     e2b_api_key: SecretStr | None = None
     semantic_scholar_api_key: SecretStr | None = None
+    tavily_api_key: SecretStr | None = None
     whatsapp_access_token: SecretStr | None = None
     whatsapp_phone_number_id: str | None = None
     whatsapp_business_account_id: str | None = None

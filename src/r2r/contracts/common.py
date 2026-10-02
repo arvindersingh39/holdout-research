@@ -74,5 +74,5 @@ class FileSpec(Part):
     """A file the math designer writes into the workspace."""
 
     path: WorkspacePath
-    purpose: Literal["test", "check", "stub", "bench", "figure_script", "fixture"]
+    purpose: Literal["test", "check", "stub", "bench", "figure_script", "fixture", "reference"]
     content: Text(40_000)

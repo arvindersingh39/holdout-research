@@ -19,6 +19,7 @@ Role = Literal[
     "optimizer",
     "digest",
     "writer",
+    "scout",
     "harness",
     "human",
     "cli",

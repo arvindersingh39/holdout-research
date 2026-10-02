@@ -6,7 +6,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, PositiveInt, model_validator
 
-from r2r.contracts.base import Contract, MilestoneId, Part, Text
+from r2r.contracts.base import Contract, CriterionId, MilestoneId, Part, Text
 from r2r.contracts.common import BlobRef, Criterion, Issue
 
 
@@ -106,3 +106,20 @@ class CoordinatorVerdict(Contract):
         if self.verdict == "revise" and not self.issues:
             raise ValueError("a revise verdict needs at least one issue")
         return self
+
+
+class BaselineCard(Contract):
+    """A published reference value for a test, quote-verified against its source (D53)."""
+
+    milestone_scoped = True
+
+    criterion_id: CriterionId
+    claim: Text(300, 1)
+    value: float | None = None
+    units: Text(60) = ""
+    precision: Text(100) = ""
+    source_url: Annotated[str, Field(pattern=r"^https?://\S+$", max_length=500)]
+    source_title: Text(200) = ""
+    quote: Text(400, 1)
+    license_note: Text(200) = ""
+    verified: bool = False
