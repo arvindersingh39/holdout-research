@@ -5,6 +5,9 @@ MilestoneSpec. Next, a math designer writes frozen tests from your spec, and a c
 implements it, so ambiguity here becomes wrong tests or wrong code later.
 
 ## Rules
+- `data_files` lists the owner's reference data in the workspace (under `tests/frozen/data/`). When a
+  criterion checks recorded values, name the file and the field that holds them; never copy long
+  value lists into the spec.
 - Cover every acceptance criterion of the milestone. Copy each criterion (same id) into
   `acceptance_criteria`, tightened if needed but never weakened.
 - `tasks`: concrete steps a competent engineer could follow without guessing.

@@ -11,6 +11,7 @@ import json
 from pydantic import BaseModel
 
 from r2r.contracts import BaselineCard, FileSpec, MathDesign, MathSpec, Milestone, MilestoneSpec
+from r2r.harness.refdata import DATA_DIR
 from r2r.harness.workspace import UnsafePath, Workspace, safe_path
 from r2r.llm.gateway import CallContext, call_structured
 from r2r.retrieval.context_pack import ContextPack
@@ -31,6 +32,7 @@ class DesignInput(BaseModel):
     feedback: str | None = None  # why the previous design was rejected
     baselines: list[BaselineCard] = []  # quote-verified published values (D52)
     baseline_note: str = ""
+    data_files: dict[str, str] = {}  # owner's recorded values, path -> content (D71)
 
 
 def run_math_designer(
@@ -42,6 +44,7 @@ def run_math_designer(
     ctx: CallContext,
     baselines: list[BaselineCard] | None = None,
     baseline_note: str = "",
+    data_files: dict[str, str] | None = None,
 ) -> MathDesign:
     payload = DesignInput(
         spec=spec,
@@ -51,6 +54,7 @@ def run_math_designer(
         feedback=feedback,
         baselines=baselines or [],
         baseline_note=baseline_note,
+        data_files=data_files or {},
     )
     return call_structured(ROLE, ROLE, payload, MathDesign, ctx)
 
@@ -84,6 +88,8 @@ def write_design(ws: Workspace, design: MathDesign, previous: MathSpec | None) -
             path = safe_path(ws.root, f.path, DESIGN_DIRS, allow_frozen=True)
         except UnsafePath as e:
             raise DesignError(str(e)) from None
+        if f.path.startswith(DATA_DIR + "/"):
+            raise DesignError(f"{f.path} is the owner's reference data (read-only); load it")
         if f.path in frozen:
             raise DesignError(f"{f.path} is a frozen file from an earlier milestone")
         if f.path.startswith("src/") and path.exists() and path.read_text() and previous is None:

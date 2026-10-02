@@ -42,6 +42,15 @@ your tests afterwards. Weak tests let wrong code through; wrong tests block corr
 - Never change a criterion's numbers (size, threshold, tolerance) so a test passes on your
   reference. If a non-perf test cannot pass on a correct reference, fix the test, not the target.
 
+## Owner reference data
+- `data_files` maps paths under `tests/frozen/data/` to their full contents: values the owner
+  recorded from earlier work, which the code must reproduce. They are authoritative.
+- Tests **load** these files (e.g. `json.load(open("tests/frozen/data/<name>"))`, path relative to
+  the workspace root) and compare against them. Never retype long value lists into test code,
+  and never write or modify anything under `tests/frozen/data/`.
+- Use each value at the precision it is recorded with (a value printed to 3 decimals is checked
+  to ±0.0005), unless the file states otherwise.
+
 ## Baselines
 - `baselines` are published values whose quotes were checked against their sources. Where one
   matches a criterion, use it as the expected value, cite `source_url` in the test's docstring, and

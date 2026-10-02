@@ -132,6 +132,14 @@ class OverseerLimits(_Strict):
     evidence_chars: PositiveInt  # cap per evidence item the overseer reads
 
 
+class ReferenceDataLimits(_Strict):
+    """D71: the owner's recorded values, from the proposal's data/ folder."""
+
+    dir: str  # folder inside the proposal
+    max_file_kb: PositiveInt
+    agent_chars: PositiveInt  # cap per file shown to the designer and overseer
+
+
 class PublishLimits(_Strict):
     """Phase 8 (D67): paper and package output."""
 
@@ -183,6 +191,7 @@ class BudgetsConfig(_Strict):
     baselines: BaselineLimits
     overseer: OverseerLimits
     publish: PublishLimits
+    reference_data: ReferenceDataLimits
     gates: GatesConfig
     contract_token_caps: dict[str, PositiveInt]
 

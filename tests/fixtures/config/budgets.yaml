@@ -33,6 +33,10 @@ publish:                          # Phase 8 (D67)
   fix_attempts: 1                 # writer fixes after a failed LaTeX compile
   log_tail_lines: 40              # compile-log lines sent back to the writer
   compile_timeout_s: 240
+reference_data:                   # owner's recorded values for tests (D71)
+  dir: data                       # folder next to proposal.md; json/csv/tsv/txt/md only
+  max_file_kb: 256
+  agent_chars: 24000              # per file, shown verbatim to the designer and overseer
 gates:
   channel: cli                       # cli | whatsapp (D2); terminal for now (D49)
   approve_first_roadmap: true

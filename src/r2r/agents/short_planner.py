@@ -25,6 +25,7 @@ class ShortPlanInput(BaseModel):
     previous_spec: MilestoneSpec | None = None
     coordinator_issues: list[Issue] = []
     max_spec_tokens: int  # the whole spec must fit in this (about 4 characters per token)
+    data_files: list[str] = []  # owner's reference data in the workspace: refer to it by path
 
 
 def run_short_planner(
@@ -34,6 +35,7 @@ def run_short_planner(
     previous: MilestoneSpec | None,
     issues: list[Issue],
     ctx: CallContext,
+    data_files: list[str] | None = None,
 ) -> MilestoneSpec:
     # The spec's cap includes the refs code attaches, so keep them compact (pilot-1, M3; D55).
     lim = ctx.settings.budgets.context_pack
@@ -50,6 +52,7 @@ def run_short_planner(
         previous_spec=previous,
         coordinator_issues=issues,
         max_spec_tokens=budget,
+        data_files=data_files or [],
     )
     return call_structured(
         ROLE,

@@ -76,6 +76,7 @@ def make_deps(
     overseer: bool = False,
     overseer_max_calls: int | None = None,
     publish_modes: tuple[str, ...] = (),
+    proposal: Path = PILOT,
 ) -> RunDeps:
     """The overseer (Phase 7c) is off unless a test turns it on: it adds LLM calls to script."""
     settings = settings or load_settings(REPO / "tests" / "fixtures" / "config", env_file=None)
@@ -93,7 +94,7 @@ def make_deps(
     if create:
         return RunDeps.create(
             run_id,
-            PILOT,
+            proposal,
             settings,
             fake,
             runs_base=tmp_path,

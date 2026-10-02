@@ -143,3 +143,15 @@ def test_result_evidence_says_totals_include_earlier_milestones() -> None:
     ev = collect_evidence({"roadmap": roadmap(), "digest": d}, "result")
     digest = next(e for e in ev if e.kind == "digest")
     assert "earlier milestones" in digest.text
+
+
+def test_reference_data_is_evidence_at_design_points() -> None:
+    data = {"tests/frozen/data/recorded.json": '{"R0": 12.6}'}
+    ev = collect_evidence({"roadmap": roadmap()}, "design", data=data)
+    ref = [e for e in ev if e.kind == "reference_data"]
+    assert ref and "tests/frozen/data/recorded.json" in ref[0].text and "12.6" in ref[0].text
+    assert not [
+        e
+        for e in collect_evidence({"roadmap": roadmap()}, "result", data=data)
+        if e.kind == "reference_data"
+    ]

@@ -45,6 +45,10 @@ from r2r.harness.hotspots import hotspot_source
 from r2r.harness.optimize import Baseline, baseline, try_patch
 from r2r.harness.profile import run_profile
 from r2r.harness.redgreen import assess
+from r2r.harness.refdata import DATA_DIR
+from r2r.harness.refdata import describe as describe_data
+from r2r.harness.refdata import install as install_data
+from r2r.harness.refdata import snapshot as snapshot_data
 from r2r.harness.reference import ReferenceError, check_reference, store_reference
 from r2r.harness.stoprule import decide
 from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
@@ -130,6 +134,7 @@ def short_plan(state: PipelineState, deps: RunDeps) -> Update:
         previous,
         issues,
         deps.ctx(m.id, _briefing(state, "short_planner")),
+        data_files=[f"{DATA_DIR}/{n}" for n in _reference_data(deps)],
     )
     return {"spec": spec}
 
@@ -139,6 +144,11 @@ def coordinate(state: PipelineState, deps: RunDeps) -> Update:
     verdict = run_coordinator(state["spec"], state["roadmap"], m, deps.ctx(m.id))
     rounds = state.get("revise_rounds", 0) + (1 if verdict.verdict == "revise" else 0)
     return {"verdict": verdict, "revise_rounds": rounds}
+
+
+def _reference_data(deps: RunDeps) -> list[str]:
+    """D71: snapshot the proposal's data/ folder into the run (once); return the file names."""
+    return snapshot_data(deps.proposal_dir, deps.paths.root, deps.settings.budgets.reference_data)
 
 
 def _existing_files(deps: RunDeps) -> list[str]:
@@ -181,6 +191,8 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
     prev = state.get("math_spec")
     previous = prev if prev is not None and prev.milestone_id == m.id else None
     failed = state.get("design_attempts", 0)
+    _reference_data(deps)
+    install_data(ws, deps.paths.root)
     try:
         out = run_math_designer(
             spec,
@@ -191,6 +203,9 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
             deps.ctx(m.id, _briefing(state, "math_designer")),
             baselines=state.get("baselines", []),
             baseline_note=state.get("baseline_note") or "",
+            data_files=describe_data(
+                deps.paths.root, deps.settings.budgets.reference_data.agent_chars
+            ),
         )
     except ContractViolation as e:  # unusable output: a failed design attempt, not a crash
         return {
@@ -523,7 +538,8 @@ def oversee(state: PipelineState, deps: RunDeps, point: OversightPoint) -> Updat
     if point in ("design", "design_gate", "code") and ms is not None:
         root = deps.workspace().root
         files = {p: (root / p).read_text() for p in ms.test_files if (root / p).is_file()}
-    evidence = collect_evidence(state, point, files, lim.evidence_chars)
+    data = describe_data(deps.paths.root, deps.settings.budgets.reference_data.agent_chars)
+    evidence = collect_evidence(state, point, files, lim.evidence_chars, data=data)
     mid = m.id if m is not None else None
     report = run_overseer(
         point,
@@ -831,6 +847,9 @@ def revise_test(state: PipelineState, deps: RunDeps) -> Update:
             feedback,
             deps.ctx(m.id, _briefing(state, "math_designer")),
             baselines=state.get("baselines", []),
+            data_files=describe_data(
+                deps.paths.root, deps.settings.budgets.reference_data.agent_chars
+            ),
         )
     except ContractViolation:
         return fail

@@ -41,6 +41,7 @@ def collect_evidence(
     point: OversightPoint,
     files: Mapping[str, str] | None = None,
     max_chars: int = 3000,
+    data: Mapping[str, str] | None = None,
 ) -> list[Evidence]:
     """What the overseer may cite at this hook point, from state contracts only."""
     items: list[tuple[str, str]] = []
@@ -96,6 +97,8 @@ def collect_evidence(
         items.append(("digest", totals + digest))
         if state.get("opt_stop_reason"):
             items.append(("optimizer", state["opt_stop_reason"]))
+    if point in ("spec", "design", "design_gate", "code"):  # the owner's recorded values (D71)
+        items += [("reference_data", f"# {p}\n{text}") for p, text in (data or {}).items()]
     if state.get("human_note"):
         items.append(("owner_note", state["human_note"]))
     return [Evidence(id=f"E{i}", kind=k, text=t[:max_chars]) for i, (k, t) in enumerate(items, 1)]
