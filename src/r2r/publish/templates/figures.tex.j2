@@ -1,7 +1,7 @@
-\BLOCK{for path, caption in figures}
+\BLOCK{for path, caption, label in figures}
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.8\linewidth]{\VAR{path}}
-\caption{\VAR{caption}}
+\caption{\VAR{caption}}\label{\VAR{label}}
 \end{figure}
 \BLOCK{endfor}

@@ -33,6 +33,7 @@ class RunRecord:
     roadmap: Roadmap
     brief: ResearchBrief | None
     milestones: list[MilestoneRecord]
+    title: str = ""  # the proposal's title
 
     @property
     def partial(self) -> bool:
@@ -48,10 +49,12 @@ def collect_from_states(states: Iterable[Mapping[str, Any]]) -> RunRecord:
     """`states` newest first, as `graph.get_state_history` yields them."""
     roadmap: Roadmap | None = None
     brief: ResearchBrief | None = None
+    title = ""
     found: dict[str, tuple[ResultDigest, MathSpec | None, list[BaselineCard]]] = {}
     for s in states:
         roadmap = roadmap or s.get("roadmap")
         brief = brief or s.get("brief")
+        title = title or (s["proposal"].title if s.get("proposal") is not None else "")
         d = s.get("digest")
         if d is None or d.milestone_id in found:
             continue
@@ -64,7 +67,7 @@ def collect_from_states(states: Iterable[Mapping[str, Any]]) -> RunRecord:
     if roadmap is None or not found:
         raise NothingToPublish("no finished milestone in this run yet")
     records = [MilestoneRecord(m, *found[m.id]) for m in roadmap.milestones if m.id in found]
-    return RunRecord(roadmap=roadmap, brief=brief, milestones=records)
+    return RunRecord(roadmap=roadmap, brief=brief, milestones=records, title=title)
 
 
 def collect_run(graph: Any, run_id: str) -> RunRecord:

@@ -79,10 +79,13 @@ def bibliography(entries: list[BibEntry]) -> str:
     return "\\begin{thebibliography}{99}\n" + items + "\n\\end{thebibliography}"
 
 
+def cited_keys(latex: str) -> set[str]:
+    return {k.strip() for m in _CITE.finditer(latex) for k in m.group(1).split(",") if k.strip()}
+
+
 def check_cites(latex: str, known: set[str]) -> None:
     """Raise ValueError naming unknown keys (inside the writer's repair loop)."""
-    used = {k.strip() for m in _CITE.finditer(latex) for k in m.group(1).split(",") if k.strip()}
-    unknown = sorted(used - known)
+    unknown = sorted(cited_keys(latex) - known)
     if unknown:
         raise ValueError(f"unknown citation keys: {', '.join(unknown)}")
 
@@ -104,6 +107,10 @@ def unverified_numbers(latex: str, sources: Iterable[str]) -> list[str]:
         if not any(abs(x - v) <= half + 1e-15 for v in values) and tok not in out:
             out.append(tok)
     return out
+
+
+def figure_label(path: str) -> str:
+    return "fig:" + re.sub(r"[^A-Za-z0-9]+", "-", Path(path).stem).strip("-")
 
 
 def render_paper(
@@ -135,7 +142,7 @@ def render_paper(
         authors=[escape(a) for a in authors],
         sections=full,
         headings=HEADINGS,
-        figures=[(p, escape(c)) for p, c in figures],
+        figures=[(p, escape(c), figure_label(p)) for p, c in figures],
         bib=bib,
         partial=partial,
     )
