@@ -40,6 +40,7 @@ class LLMResponse(BaseModel):
     cost_usd: float | None = None  # None: the gateway prices it
     latency_ms: int = 0
     reasoning_tokens: int = 0  # thinking tokens billed (Anthropic returns no thinking text)
+    truncated: bool = False  # the reply hit max_tokens: any tool call in it may be cut off
 
 
 class EmbedResponse(BaseModel):
@@ -141,8 +142,10 @@ class LiteLLMClient:
             cost = float(litellm.completion_cost(completion_response=resp))
         except Exception:
             cost = None
+        finish = getattr(resp.choices[0], "finish_reason", None)
         out = LLMResponse(
             model=req.model,
+            truncated=finish in ("length", "max_tokens"),
             text=msg.content,
             tool_calls=[
                 ToolCall(id=tc.id, name=tc.function.name, arguments=tc.function.arguments or "{}")

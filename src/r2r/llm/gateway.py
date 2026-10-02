@@ -20,7 +20,7 @@ from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait
 from r2r.contracts import Contract, ContractTooLarge, ensure_within_cap
 from r2r.llm.client import LLMCallError, LLMClient, LLMRequest, LLMResponse, TransientLLMError
 from r2r.llm.tokens import estimate_tokens
-from r2r.llm.tools import Tool, ToolLoopResult, ToolLoopState, dispatch
+from r2r.llm.tools import Tool, ToolLoopResult, ToolLoopState, ToolResult, dispatch
 from r2r.log import get_logger
 from r2r.settings import RoleConfig, Settings
 from r2r.store.ledger import CallRecord, Ledger
@@ -170,6 +170,7 @@ def run_tool_loop(
     schemas = [t.schema() for t in tools]
     messages = [_system_message(prompt_id, "", ctx), _user_message(payload)]
     state = ToolLoopState()
+    failures: list[str] = []  # per turn: the failing calls and errors, or "" if anything worked
 
     while state.turns < max_turns:
         req = LLMRequest(
@@ -200,13 +201,23 @@ def run_tool_loop(
                 ],
             }
         )
-        state.last_results = [dispatch(c, by_name) for c in resp.tool_calls]
+        if resp.truncated:  # a cut-off call may lack arguments: never run it, say why
+            state.last_results = [
+                ToolResult(c.id, c.name, CUT_OFF.format(limit=max_out), ok=False)
+                for c in resp.tool_calls
+            ]
+        else:
+            state.last_results = [dispatch(c, by_name) for c in resp.tool_calls]
         messages += [
             {"role": "tool", "tool_call_id": r.call_id, "content": r.output}
             for r in state.last_results
         ]
         if stop_fn(state):
             return ToolLoopResult(state.turns, "stop_fn", None, state)
+        failures.append(_failure_key(resp.tool_calls, state.last_results))
+        if len(failures) >= STUCK_AFTER and failures[-1] and len(set(failures[-STUCK_AFTER:])) == 1:
+            note = f"Stopped: the same failing call {STUCK_AFTER} times in a row: {failures[-1]}"
+            return ToolLoopResult(state.turns, "stuck", note[:1000], state)
     return ToolLoopResult(state.turns, "max_turns", None, state)
 
 
@@ -246,6 +257,24 @@ def _embed_batch(model: str, batch: list[str], ctx: CallContext) -> list[list[fl
             _record(ctx, req, resp=LLMResponse(model=model, input_tokens=tokens), cost=cost)
             return resp.vectors
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+STUCK_AFTER = 3  # identical failing turns in a row end a tool loop (plain Python, D69)
+CUT_OFF = (
+    "error: your reply hit the output limit ({limit} tokens) and this call was cut off before "
+    "it finished, so it was not run. Write big files in parts: create_file with the first part, "
+    "then append_file for the rest, each well under the limit."
+)
+
+
+def _failure_key(calls: list, results: list[ToolResult]) -> str:
+    """Identical across turns only when every call failed the same way with the same input."""
+    if not results or any(r.ok for r in results):
+        return ""
+    return " | ".join(
+        f"{c.name}({c.arguments[:200]}) -> {r.output[:200]}"
+        for c, r in zip(calls, results, strict=False)
+    )
 
 
 def _with_cache_point(

@@ -48,7 +48,7 @@ class ToolLoopState:
 @dataclass(frozen=True)
 class ToolLoopResult:
     turns: int
-    stopped_by: Literal["stop_fn", "max_turns", "no_tool_calls"]
+    stopped_by: Literal["stop_fn", "max_turns", "no_tool_calls", "stuck"]
     final_text: str | None
     state: ToolLoopState
 

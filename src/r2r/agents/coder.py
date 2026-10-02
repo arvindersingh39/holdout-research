@@ -51,6 +51,11 @@ class CreateArgs(BaseModel):
     content: str
 
 
+class AppendArgs(BaseModel):
+    path: str
+    content: str
+
+
 class NoArgs(BaseModel):
     pass
 
@@ -107,6 +112,14 @@ class CoderTools:
                 f"Create or overwrite a file under src/ or bench/ (at most {CREATE_LINES} lines).",
                 CreateArgs,
                 self.create_file,
+                max_output_chars=500,
+            ),
+            Tool(
+                "append_file",
+                "Append `content` to a file under src/ or bench/ (created if missing). Use it to "
+                f"write a big file in parts; each part at most {CREATE_LINES} lines.",
+                AppendArgs,
+                self.append_file,
                 max_output_chars=500,
             ),
             Tool(
@@ -189,6 +202,17 @@ class CoderTools:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(args.content)
         return f"wrote {args.path} ({n} lines)"
+
+    def append_file(self, args: AppendArgs) -> str:
+        n = len(args.content.splitlines())
+        if n > CREATE_LINES:
+            raise ValueError(f"part has {n} lines; at most {CREATE_LINES} lines per call")
+        path = self._writable(args.path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as f:
+            f.write(args.content)
+        total = len(path.read_text().splitlines())
+        return f"appended {n} lines to {args.path} ({total} lines now)"
 
     # --- test --------------------------------------------------------------------------------
 

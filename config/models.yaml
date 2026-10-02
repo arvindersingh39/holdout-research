@@ -9,8 +9,8 @@ roles:
   coordinator:   {model: openrouter/google/gemini-3.1-pro-preview, max_tokens: 800}
   math_designer: {model: openrouter/google/gemini-3.1-pro-preview, max_tokens: 16000,
                   thinking_budget: 4000}
-  coder:         {model: anthropic/claude-sonnet-5-5,              max_tokens: 4000,
-                  escalate_to: anthropic/claude-opus-5-5}
+  coder:         {model: anthropic/claude-sonnet-5-5,              max_tokens: 8000,
+                  escalate_to: anthropic/claude-opus-5-5}  # 8000: D69
   optimizer:     {model: openrouter/google/gemini-3.8-flash,       max_tokens: 4000,
                   thinking_budget: 2000}
   digest:        {model: openrouter/google/gemini-3.8-flash,       max_tokens: 300,

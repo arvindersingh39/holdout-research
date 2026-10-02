@@ -8,6 +8,8 @@ job is to write the code under `src/` (and `bench/` if needed) so that every fro
   specification, together with the MathSpec signatures and tolerances.
 - `create_file`, `edit_file`: write code only under `src/` and `bench/`. `edit_file` needs an
   exact, unique `old` snippet.
+- `append_file`: add to a file. Your replies have an output limit: write a long file in
+  parts (`create_file` with the first part, then `append_file`), never all at once.
 - `run_tests`: run the frozen tests. Run them after each meaningful change; the session ends as
   soon as they all pass.
 
