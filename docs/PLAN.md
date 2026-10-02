@@ -477,6 +477,19 @@ All contracts live in `src/r2r/contracts/`. A shared base class adds `created_by
 
 **⛔ Checkpoint 7.** Before building the WhatsApp channel, confirm D10 and D11 and check that the owner has finished the §13 checklist. At the end of the phase, review cost per role together; the owner picks the real proposal for the second pilot.
 
+### Phase 7c — Overseer: problem-specific briefings for the agents (S)
+Added by the owner after Checkpoint 7 (pilot-2 exposed problems no agent could see: a wrong
+expected value in the roadmap, a reference bug read as a test bug, a weakened speed criterion).
+- Role `overseer` (Opus) runs at five plain-Python hook points: before the roadmap gate, after the
+  coordinator passes, after a rejected design, after a failed coder session, before the result gate.
+- It reads code-built, numbered evidence and returns an `OversightReport`: briefings (per role,
+  added to that role's next prompts after the cached system prompt) and flags (shown at gates).
+  Items citing unknown evidence are dropped; sizes and call counts are capped in `budgets.yaml`.
+- Advice only: it cannot route, approve, retry, stop or spend; briefings apply automatically and are
+  shown at every gate. Planner briefings from a result review carry into the next milestone.
+- **Done when:** FakeLLM tests cover hooks, delivery, caps and budget stops; a live call flags a
+  wrong expected value in a roadmap; pilot-2 continues with the overseer on.
+
 ### Phase 8 — Writer and packager (#7) (M) ⛔
 
 **Goal.** Publish-ready output built from digests, never from build history.
