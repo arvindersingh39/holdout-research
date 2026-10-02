@@ -25,6 +25,7 @@ class RedGreen:
     broken_excerpts: dict[str, str] = field(default_factory=dict)
     unsatisfiable: list[str] = field(default_factory=list)  # fail even on the reference (D54)
     no_reference: bool = False
+    perf_unmet: list[str] = field(default_factory=list)  # perf targets the reference misses (D60)
 
     def describe(self) -> str:
         """Feedback for the math designer (or the human at the design gate)."""
@@ -72,9 +73,11 @@ def assess(
     failing_checks = [c.file for c in checks if not c.passed]
     no_reference = reference_cases is None
     unsatisfiable: list[str] = []
+    perf_unmet: list[str] = []
     if isinstance(reference_cases, list | tuple):
-        unsatisfiable = sorted(
-            c.test_id for c in reference_cases if c.outcome in ("failed", "error")
+        unsatisfiable = sorted(c.test_id for c in reference_cases if c.misses_reference)
+        perf_unmet = sorted(
+            c.test_id for c in reference_cases if c.outcome == "failed" and c.is_perf
         )
     return RedGreen(
         ok=not vacuous
@@ -83,6 +86,7 @@ def assess(
         and not no_reference
         and not unsatisfiable,
         unsatisfiable=unsatisfiable,
+        perf_unmet=perf_unmet,
         no_reference=no_reference,
         vacuous=vacuous,
         broken=sorted(broken),

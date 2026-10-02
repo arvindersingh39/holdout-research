@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 from graph_helpers import (
+    GOOD_TESTS,
     IMPL,
     PASS,
     ROADMAP,
@@ -29,6 +30,21 @@ from test_scout import KEY, FakeTavily
 PAGE_QUOTE = "the Black-Scholes call price is 10.4506"
 WRONG_TESTS = (
     "from {pkg}.core import square\n\n\ndef test_AC1__wrong():\n    assert square(3) == 10\n"
+)
+
+SLOW_REF = (
+    "import time\n\n\ndef square(x: float) -> float:\n    time.sleep(0.5)\n    return x * x\n"
+)
+PERF_TESTS = (
+    GOOD_TESTS
+    + """
+
+def test_AC1__perf_fast_square():
+    import time
+    t0 = time.perf_counter()
+    square(2.0)
+    assert time.perf_counter() - t0 < 0.2
+"""
 )
 
 
@@ -167,3 +183,18 @@ def test_dispute_redirect_and_stop(tmp_path: Path, fake: FakeLLM) -> None:
     ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
     _, res = _run(tmp_path, fake, ch)
     assert ch.gates == ["roadmap", "tests", "dispute"] and res.status == "stopped"
+
+
+def test_perf_test_missed_by_reference_reaches_tests_gate_and_coder_meets_it(
+    tmp_path: Path, fake: FakeLLM
+) -> None:
+    _start(fake)
+    fake.script("math_designer", design(1, PERF_TESTS, reference=SLOW_REF))
+    fake.script("coder", *coder_pass(1))
+    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+    _, res = _run(tmp_path, fake, ch)
+    assert ch.gates == ["roadmap", "tests", "result"]  # not rejected as unsatisfiable
+    md = ch.requests[1].markdown
+    assert "Performance tests" in md and "test_AC1__perf_fast_square" in md
+    assert "not met by the reference" in md
+    assert res.state["digest"].status == "met"

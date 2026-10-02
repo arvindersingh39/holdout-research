@@ -12,7 +12,7 @@ from r2r.contracts import FileSpec
 from r2r.harness.redgreen import assess
 from r2r.harness.reference import ReferenceError, check_reference, store_reference
 from r2r.harness.sandbox import LocalProcessBackend
-from r2r.harness.tests import run_tests_detailed
+from r2r.harness.tests import CaseOutcome, run_tests_detailed
 from r2r.harness.workspace import Workspace
 from r2r.store.runs import run_paths
 
@@ -121,3 +121,52 @@ def test_reference_paths_must_mirror_src(tmp_path: Path) -> None:
         store_reference(
             tmp_path / "ref", [FileSpec(path="bench/x.py", purpose="reference", content="x")]
         )
+
+
+# --- performance tests (D60): targets for the coder, not required of the minimal reference ----
+
+
+def _case(name: str, outcome: str, text: str = "") -> CaseOutcome:
+    return CaseOutcome(
+        f"tests.frozen.test_m1::{name}", "tests/frozen/test_m1.py", name, outcome, text
+    )  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("name", "perf"),
+    [
+        ("test_AC4__perf_64x64_sweeps", True),
+        ("test_AC4__perf[64]", True),
+        ("test_AC4__performance_is_great", False),
+        ("test_AC4__timing", False),
+        ("test_perf", False),
+    ],
+)
+def test_perf_naming(name: str, perf: bool) -> None:
+    assert _case(name, "passed").is_perf is perf
+
+
+def test_perf_test_failing_on_reference_is_allowed_and_reported() -> None:
+    stubs = [
+        _case("test_AC1__x", "failed", "NotImplementedError"),
+        _case("test_AC4__perf_t", "failed", "NotImplementedError"),
+    ]
+    ref = [_case("test_AC1__x", "passed"), _case("test_AC4__perf_t", "failed", "assert 0.9 < 0.5")]
+    rg = assess(["AC1", "AC4"], stubs, [], reference_cases=ref)
+    assert rg.ok and rg.unsatisfiable == []
+    assert rg.perf_unmet == ["tests.frozen.test_m1::test_AC4__perf_t"]
+
+
+def test_perf_test_erroring_on_reference_is_still_unsatisfiable() -> None:
+    stubs = [_case("test_AC4__perf_t", "failed", "NotImplementedError")]
+    ref = [_case("test_AC4__perf_t", "error", "fixture 'big' not found")]
+    rg = assess(["AC4"], stubs, [], reference_cases=ref)
+    assert not rg.ok and rg.unsatisfiable == ["tests.frozen.test_m1::test_AC4__perf_t"]
+
+
+def test_correctness_failure_on_reference_never_exempt() -> None:
+    stubs = [_case("test_AC1__x", "failed", "NotImplementedError")]
+    rg = assess(
+        ["AC1"], stubs, [], reference_cases=[_case("test_AC1__x", "failed", "assert 1 == 2")]
+    )
+    assert not rg.ok and rg.perf_unmet == []

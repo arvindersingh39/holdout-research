@@ -118,7 +118,9 @@ BROKEN_TESTS = (
 )
 
 
-def design(n: int, tests: str = GOOD_TESTS, bench: bool = False) -> MathDesign:
+def design(
+    n: int, tests: str = GOOD_TESTS, bench: bool = False, reference: str = IMPL
+) -> MathDesign:
     """`bench=False` (default) skips the optimizer loop for that milestone."""
     pkg = f"sq{n}"
     meta = {"created_by": "math_designer", "run_id": "g", "milestone_id": f"M{n}"}
@@ -140,7 +142,7 @@ def design(n: int, tests: str = GOOD_TESTS, bench: bool = False) -> MathDesign:
         FileSpec(path=check_file, purpose="check", content="assert (2 + 3) ** 2 == 25\n"),
         FileSpec(path=f"src/{pkg}/__init__.py", purpose="stub", content=""),
         FileSpec(path=f"src/{pkg}/core.py", purpose="stub", content=STUB),
-        FileSpec(path=f"src/{pkg}/core.py", purpose="reference", content=IMPL),
+        FileSpec(path=f"src/{pkg}/core.py", purpose="reference", content=reference),
     ]
     if bench:
         body = "def main():\n    for _ in range(2000):\n        square(2.0)\n"

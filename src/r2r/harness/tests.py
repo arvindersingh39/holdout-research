@@ -10,6 +10,7 @@ import re
 import shutil
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from r2r.contracts import Failure, TestResult
@@ -23,6 +24,7 @@ TAIL_LINES = 15
 TAIL_CHARS = 2000
 MAX_REPORT_BYTES = 2_000_000
 _CRITERION = re.compile(r"^test_(AC\d{1,3})__")
+_PERF = re.compile(r"^test_AC\d{1,3}__perf(?:_|\[|$)")  # performance targets (D60)
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,30 @@ class CaseOutcome:
     def criterion_id(self) -> str | None:
         m = _CRITERION.match(self.name)
         return m.group(1) if m else None
+
+    @property
+    def is_perf(self) -> bool:
+        """`test_AC4__perf_<what>`: a speed target for the coder, not for the reference (D60)."""
+        return bool(_PERF.match(self.name))
+
+    @property
+    def misses_reference(self) -> bool:
+        """Failing on the reference makes a test unsatisfiable, unless it is a perf target that
+        ran and missed (an error, e.g. in collection or setup, still counts)."""
+        return self.outcome == "error" or (self.outcome == "failed" and not self.is_perf)
+
+
+_TEST_DEF = re.compile(r"^\s*def (test_\w+)\(", re.MULTILINE)
+
+
+def test_names(root: Path, files: list[str]) -> list[str]:
+    """Test function names defined in these files (read statically, without running pytest)."""
+    names: list[str] = []
+    for f in files:
+        path = root / f
+        if path.is_file():
+            names += _TEST_DEF.findall(path.read_text(errors="replace"))
+    return names
 
 
 class UnsafeReport(ValueError):

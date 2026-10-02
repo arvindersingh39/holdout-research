@@ -44,7 +44,7 @@ from r2r.harness.profile import run_profile
 from r2r.harness.redgreen import assess
 from r2r.harness.reference import ReferenceError, check_reference, store_reference
 from r2r.harness.stoprule import decide
-from r2r.harness.tests import run_tests, run_tests_detailed
+from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
 from r2r.ingest.proposal import ingest_proposal
 from r2r.llm.gateway import BudgetExceeded, ContractViolation
 from r2r.retrieval.context_pack import build_pack
@@ -223,6 +223,7 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
         "test_result": result,
         "design_attempts": failed if rg.ok else failed + 1,
         "design_feedback": None if rg.ok else rg.describe(),
+        "perf_unmet": rg.perf_unmet,
     }
 
 
@@ -516,6 +517,7 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
         "opt_bench_hash": None,
         "baselines": [],
         "baseline_note": None,
+        "perf_unmet": [],
         "dispute": None,
         "dispute_file": None,
         "coder_message": None,
@@ -535,7 +537,8 @@ def tests_gate(state: PipelineState, deps: RunDeps) -> Update:
     files = render_files(deps.workspace().root, [*ms.test_files, *ms.check_files])
     md = (
         render(ms) + "\n\nAll criteria fail on the stubs with NotImplementedError, and every "
-        "test passes on the designer's reference solution.\n\n"
+        "correctness test passes on the designer's reference solution.\n\n"
+        + _render_perf(test_names(deps.workspace().root, ms.test_files), state)
         + _render_baselines(state)
         + "\n\n"
         + files
@@ -634,6 +637,19 @@ def budget_gate(state: PipelineState, deps: RunDeps) -> Update:
     return update | {"budget_retry": blocked}
 
 
+def _render_perf(names: list[str], state: PipelineState) -> str:
+    """D60: speed targets are listed apart so a weakened number is easy to spot."""
+    perf = [n for n in names if CaseOutcome("", "", n, "passed", "").is_perf]
+    if not perf:
+        return ""
+    unmet = {t.rsplit("::", 1)[-1] for t in state.get("perf_unmet", [])}
+    lines = ["**Performance tests** (targets the coder must meet; compare with the criteria)"]
+    for n in perf:
+        note = " · not met by the reference (allowed)" if n in unmet else ""
+        lines.append(f"- {n}{note}")
+    return "\n".join(lines) + "\n\n"
+
+
 def _render_baselines(state: PipelineState) -> str:
     cards = state.get("baselines", [])
     lines = [f"**Published baselines** ({state.get('baseline_note') or 'none'})"]
@@ -705,7 +721,7 @@ def revise_test(state: PipelineState, deps: RunDeps) -> Update:
         milestone_id=m.id,
         timeout_s=timeout,
     )
-    if not ref_cases or any(c.outcome in ("failed", "error") for c in ref_cases):
+    if not ref_cases or any(c.misses_reference for c in ref_cases):
         git.run("checkout", "HEAD", "--", file)  # revert to the frozen version
         freeze(ws)
         return fail | {"coder_message": "The revised test still fails on the reference solution."}

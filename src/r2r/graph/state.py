@@ -43,6 +43,7 @@ class PipelineState(TypedDict, total=False):
     tamper_attempts: int  # blocked writes to frozen files, over the whole run
     baselines: list[BaselineCard]  # quote-verified published values for this milestone (D52)
     baseline_note: str | None
+    perf_unmet: list[str]  # perf tests the reference misses; the coder must meet them (D60)
     dispute: str | None  # the coder's dispute of a frozen test, rendered (D56)
     dispute_file: str | None
     coder_message: str | None  # the coder's final words in its last session

@@ -32,6 +32,15 @@ your tests afterwards. Weak tests let wrong code through; wrong tests block corr
   runs your tests against it before freezing: any test that fails on your own reference can never
   pass and is rejected. The coder never sees the reference.
 
+## Performance criteria
+- A speed or resource target (e.g. "1000 sweeps in under 0.5 s") gets a test named
+  `test_<CRITERION>__perf_<what>` that checks **exactly the criterion's numbers** (problem size,
+  limit, repeats). Warm up any JIT before timing and take the median of the stated repeats.
+- Your reference is minimal and unoptimised, so it may miss a perf target: that is allowed and is
+  shown to the owner. Every other test must still pass on the reference.
+- Never change a criterion's numbers (size, threshold, tolerance) so a test passes on your
+  reference. If a non-perf test cannot pass on a correct reference, fix the test, not the target.
+
 ## Baselines
 - `baselines` are published values whose quotes were checked against their sources. Where one
   matches a criterion, use it as the expected value, cite `source_url` in the test's docstring, and
