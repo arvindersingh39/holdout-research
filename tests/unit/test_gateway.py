@@ -311,3 +311,43 @@ def test_anthropic_reasoning_budget_unchanged(ctx: CallContext, fake: FakeLLM) -
     req = fake.calls[0]
     assert req.thinking == {"type": "enabled", "budget_tokens": 4000}
     assert req.extra == {}
+
+
+# --- finalize inside the repair loop (found by pilot-1, M3) ----------------------------
+
+
+def test_finalize_overflow_gets_one_repair(ctx: CallContext, fake: FakeLLM) -> None:
+    """A draft that fits but overflows its cap once code adds fields must get the normal
+    repair round (with the cap message), not crash the run."""
+    from r2r.contracts import ContractTooLarge, Roadmap
+
+    calls = []
+
+    def finalize(draft: Roadmap) -> Roadmap:
+        calls.append(draft)
+        if len(calls) == 1:
+            raise ContractTooLarge("MilestoneSpec", 1579, 1500)
+        return draft
+
+    fake.script("long_planner", roadmap(), roadmap())
+    out = call_structured(
+        "long_planner", "long_planner", research_brief(), Roadmap, ctx, finalize=finalize
+    )
+    assert isinstance(out, Roadmap) and len(calls) == 2
+    repair = fake.calls[1].messages[-1]["content"]
+    assert "cap is 1500" in repair
+    rows = ctx.ledger.rows("run-test")
+    assert rows[0].error and "cap is 1500" in rows[0].error
+
+
+def test_finalize_overflow_twice_is_contract_violation(ctx: CallContext, fake: FakeLLM) -> None:
+    from r2r.contracts import ContractTooLarge, Roadmap
+
+    def finalize(draft: Roadmap) -> Roadmap:
+        raise ContractTooLarge("MilestoneSpec", 1579, 1500)
+
+    fake.script("long_planner", roadmap(), roadmap())
+    with pytest.raises(ContractViolation, match="cap"):
+        call_structured(
+            "long_planner", "long_planner", research_brief(), Roadmap, ctx, finalize=finalize
+        )

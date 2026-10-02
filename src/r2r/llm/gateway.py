@@ -75,8 +75,13 @@ def call_structured[C: BaseModel](
     ctx: CallContext,
     *,
     model: str | None = None,
-) -> C:
-    """One LLM call whose output is validated into `output_model`."""
+    finalize: Callable[[Any], Any] | None = None,
+) -> Any:
+    """One LLM call whose output is validated into `output_model`.
+
+    `finalize` (optional) turns the validated draft into the final contract, e.g. by adding fields
+    that code fills in. It runs inside the repair loop, so a cap overflow there gets the usual
+    single repair instead of failing the run."""
     cfg = ctx.settings.models.roles[role]
     model = _resolve_model(role, cfg, model)
     max_out, thinking, extra = _output_limit(cfg, model)
@@ -126,7 +131,8 @@ def call_structured[C: BaseModel](
         )
         raw = _raw_output(_invoke(req, ctx), native)
         try:
-            return _parse(raw, output_model, meta, model)
+            parsed = _parse(raw, output_model, meta, model)
+            return finalize(parsed) if finalize is not None else parsed
         except (ValueError, ContractTooLarge) as e:  # ValidationError is a ValueError
             error = _describe(e)
             log.warning("invalid output", extra={"role": role, "attempt": attempt, "error": error})

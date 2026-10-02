@@ -63,15 +63,14 @@ def run_retriever(
         )
 
     proposal_doc = wrap_document(blobs.get_slice(proposal.text_ref, limit), source="proposal.md")
-    draft = call_structured(
+    refs = [r.model_dump() for r in card_refs]
+    brief = call_structured(
         ROLE,
         "retriever_brief",
         BriefInput(proposal=proposal_doc, paper_cards=cards),
         BriefDraft,
         ctx,
-    )
-    brief = finalize(
-        ResearchBrief, draft, ROLE, ctx, paper_cards=[r.model_dump() for r in card_refs]
+        finalize=lambda draft: finalize(ResearchBrief, draft, ROLE, ctx, paper_cards=refs),
     )
     brief_ref = blobs.put(
         brief.model_dump_json(),

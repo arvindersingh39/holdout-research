@@ -9,7 +9,7 @@ from pdfs import INJECTION, make_paper
 from samples import paper_card, research_brief
 
 from r2r.agents.retriever import run_retriever
-from r2r.contracts import ContractTooLarge, PaperCard, ResearchBrief, set_contract_caps
+from r2r.contracts import PaperCard, ResearchBrief, set_contract_caps
 from r2r.ingest.proposal import ingest_proposal
 from r2r.llm.fake import FakeLLM
 from r2r.llm.gateway import CallContext
@@ -125,11 +125,21 @@ def test_every_call_is_ledgered(env: Env) -> None:
 
 
 def test_brief_cap_enforced(env: Env) -> None:
+    """Over the cap once papers are attached: one repair, then ContractViolation (never a
+    brief over its cap)."""
+    from r2r.llm.gateway import ContractViolation
+
     prop = ingest_proposal(env.proposal_dir, env.blobs, env.index, env.ctx)
-    env.fake.script("retriever", paper_card(), BRIEF_DRAFT)
+    env.fake.script("retriever", paper_card(), BRIEF_DRAFT, BRIEF_DRAFT)
     set_contract_caps({"ResearchBrief": 50})
-    with pytest.raises(ContractTooLarge):
+    with pytest.raises(ContractViolation, match="cap is 50"):
         run_retriever(prop, env.blobs, env.paths, env.ctx)
+    briefs = [
+        r
+        for r in env.fake.calls
+        if r.messages[0]["content"][0]["text"].startswith("# retriever_brief")
+    ]
+    assert len(briefs) == 2  # original + one repair
 
 
 def test_no_papers(env: Env) -> None:

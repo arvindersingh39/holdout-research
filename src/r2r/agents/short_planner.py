@@ -38,7 +38,12 @@ def run_short_planner(
         previous_spec=previous,
         coordinator_issues=issues,
     )
-    draft = call_structured(ROLE, ROLE, payload, SpecDraft, ctx)
-    return finalize(
-        MilestoneSpec, draft, ROLE, ctx, context_refs=[r.model_dump() for r in pack.refs]
+    refs = [r.model_dump() for r in pack.refs]
+    return call_structured(
+        ROLE,
+        ROLE,
+        payload,
+        SpecDraft,
+        ctx,
+        finalize=lambda draft: finalize(MilestoneSpec, draft, ROLE, ctx, context_refs=refs),
     )
