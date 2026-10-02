@@ -140,6 +140,19 @@ def test_full_pipeline_in_container(ws: Workspace, box: DockerBackend) -> None:
     assert sloc(box) > 5
 
 
+def test_matplotlib_headless_png(ws: Workspace, box: DockerBackend) -> None:
+    # D57: figures are drawn with no display, a read-only root and the font cache in /tmp
+    code = (
+        "import matplotlib; matplotlib.use('Agg')\n"
+        "import matplotlib.pyplot as plt\n"
+        "fig, ax = plt.subplots(); ax.loglog([1, 10, 100], [1, 0.3, 0.1]); ax.set_xlabel('$N$')\n"
+        "fig.savefig('figures/check.png', dpi=72)\n"
+    )
+    res = box.run(py(code), 120)
+    assert res.exit_code == 0, res.stderr[-2000:]
+    assert (ws.root / "figures" / "check.png").read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_tectonic_offline(ws: Workspace, box: DockerBackend) -> None:
     (ws.root / "figures" / "paper.tex").write_text(
         "\\documentclass{article}\\usepackage{amsmath,booktabs,hyperref}\n"
