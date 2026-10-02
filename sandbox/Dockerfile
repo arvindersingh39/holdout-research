@@ -22,9 +22,10 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 ENV TECTONIC_CACHE_DIR=/opt/tectonic-cache
-COPY warmup.tex /opt/warmup/warmup.tex
+COPY warmup.tex warmup_plain.tex /opt/warmup/
 RUN mkdir -p /opt/tectonic-cache /tmp/warm \
  && tectonic -o /tmp/warm /opt/warmup/warmup.tex \
+ && tectonic -o /tmp/warm /opt/warmup/warmup_plain.tex \
  && rm -rf /tmp/warm \
  && chmod -R a+rX /opt/tectonic-cache
 
