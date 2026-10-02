@@ -12,6 +12,7 @@ from r2r.contracts.base import (
 from r2r.contracts.common import BlobKind, BlobRef, Criterion, Failure, FileSpec, Hotspot, Issue
 from r2r.contracts.harness import OptimizationOutcome, OptimizationPatch, ProfileReport, TestResult
 from r2r.contracts.math import BenchSpec, MathDesign, MathSpec
+from r2r.contracts.oversight import Briefing, OversightFlag, OversightReport
 from r2r.contracts.planning import (
     BaselineCard,
     Citation,
@@ -30,6 +31,7 @@ __all__ = [
     "BenchSpec",
     "BlobKind",
     "BlobRef",
+    "Briefing",
     "Citation",
     "Contract",
     "ContractTooLarge",
@@ -47,6 +49,8 @@ __all__ = [
     "MilestoneSpec",
     "OptimizationOutcome",
     "OptimizationPatch",
+    "OversightFlag",
+    "OversightReport",
     "PaperCard",
     "Part",
     "ProfileReport",

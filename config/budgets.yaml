@@ -21,6 +21,13 @@ baselines:                        # published reference values for tests, via Ta
   max_queries: 4                  # per milestone
   max_pages: 6                    # pages extracted per milestone
   page_tokens: 4000               # cap per page read by the scout
+overseer:                         # advisor: evidence-cited briefings, never routes (D62-D64)
+  enabled: true
+  max_calls_milestone: 6          # hook points: plan, spec, rejected design, failed session, result
+  briefing_tokens: 400            # cap per briefing
+  max_briefings: 4                # per report
+  flags_shown: 6                  # newest flags shown at each gate
+  evidence_chars: 3000            # cap per evidence item (test file, failure, spec) it reads
 gates:
   channel: cli                       # cli | whatsapp (D2); terminal for now (D49)
   approve_first_roadmap: true
@@ -42,3 +49,4 @@ contract_token_caps:
   TestResult: 1500
   ProfileReport: 1000
   ResultDigest: 800
+  OversightReport: 2000

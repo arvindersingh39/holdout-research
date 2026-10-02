@@ -32,6 +32,7 @@ ROLES = (
     "digest",
     "writer",
     "scout",
+    "overseer",
 )
 
 DEFAULT_CONFIG_DIR = Path("config")
@@ -120,6 +121,17 @@ class BaselineLimits(_Strict):
     page_tokens: PositiveInt
 
 
+class OverseerLimits(_Strict):
+    """Phase 7c (D64): the advisor that writes evidence-cited briefings for the other agents."""
+
+    enabled: bool
+    max_calls_milestone: PositiveInt
+    briefing_tokens: PositiveInt  # cap per briefing
+    max_briefings: PositiveInt  # per report
+    flags_shown: PositiveInt  # newest flags shown at each gate
+    evidence_chars: PositiveInt  # cap per evidence item the overseer reads
+
+
 class ContextPackTokens(_Strict):
     short_planner: PositiveInt
     math_designer: PositiveInt
@@ -160,6 +172,7 @@ class BudgetsConfig(_Strict):
     context_pack_tokens: ContextPackTokens
     context_pack: ContextPackLimits
     baselines: BaselineLimits
+    overseer: OverseerLimits
     gates: GatesConfig
     contract_token_caps: dict[str, PositiveInt]
 
