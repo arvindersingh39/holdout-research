@@ -125,3 +125,21 @@ def test_config_loads(ctx: CallContext) -> None:
     assert lim.enabled and lim.max_calls_milestone == 6 and lim.max_briefings == 4
     role = ctx.settings.models.roles["overseer"]
     assert role.model == "anthropic/claude-opus-5-5" and role.thinking_budget == 2000
+
+
+def test_result_evidence_says_totals_include_earlier_milestones() -> None:
+    from r2r.contracts import CriterionResult, ResultDigest
+
+    d = ResultDigest(
+        created_by="harness",
+        run_id="r",
+        milestone_id="M2",
+        status="met",
+        criteria=[CriterionResult(id="AC1", passed=True, evidence="3/3 tests pass")],
+        metrics={"tests_passed": 12.0},
+        cost_usd=0.1,
+        tokens=1,
+    )
+    ev = collect_evidence({"roadmap": roadmap(), "digest": d}, "result")
+    digest = next(e for e in ev if e.kind == "digest")
+    assert "earlier milestones" in digest.text

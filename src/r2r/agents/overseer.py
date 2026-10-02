@@ -88,9 +88,12 @@ def collect_evidence(
         items += [("test_file", f"# {p}\n{src}") for p, src in (files or {}).items()]
     if point == "result" and state.get("digest") is not None:
         d = state["digest"]
-        items.append(
-            ("digest", d.model_dump_json(include={"status", "criteria", "metrics", "deviations"}))
+        totals = (
+            "Note: tests_passed/tests_failed count the whole frozen suite, including earlier "
+            "milestones' tests; per-criterion counts cover this milestone only.\n"
         )
+        digest = d.model_dump_json(include={"status", "criteria", "metrics", "deviations"})
+        items.append(("digest", totals + digest))
         if state.get("opt_stop_reason"):
             items.append(("optimizer", state["opt_stop_reason"]))
     if state.get("human_note"):

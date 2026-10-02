@@ -494,7 +494,10 @@ def oversee(state: PipelineState, deps: RunDeps, point: OversightPoint) -> Updat
         dict(state.get("briefings") or {}),
         deps.ctx(mid),
     )
-    briefings = dict(state.get("briefings") or {})
+    # at a result review only its own advice stands: earlier briefings and flags are about work
+    # that is now finished
+    fresh = point == "result"
+    briefings = {} if fresh else dict(state.get("briefings") or {})
     carry = dict(state.get("carry_briefings") or {})
     for b in report.briefings:
         briefings[b.role] = b.text
@@ -503,7 +506,7 @@ def oversee(state: PipelineState, deps: RunDeps, point: OversightPoint) -> Updat
     return {
         "briefings": briefings,
         "carry_briefings": carry,
-        "flags": [*(state.get("flags") or []), *report.flags],
+        "flags": [*([] if fresh else state.get("flags") or []), *report.flags],
         "oversee_calls": state.get("oversee_calls", 0) + 1,
     }
 

@@ -78,6 +78,7 @@ def test_hooks_briefings_and_flags_through_one_milestone(tmp_path: Path, fake: F
     assert len(_system(first)) == 1
     assert "no assert True" in _system(second)[1]["text"]
     assert "Next spec: state tolerances" in ch.requests[-1].markdown  # active briefings shown
+    assert "no assert True" not in ch.requests[-1].markdown  # design-stage briefing dropped
     assert res.state["digest"].status == "met"
 
 
