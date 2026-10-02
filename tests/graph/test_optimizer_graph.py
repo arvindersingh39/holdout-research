@@ -103,3 +103,21 @@ def test_resume_mid_loop_continues_from_next_attempt(tmp_path: Path, fake: FakeL
     assert [o.attempt for o in res.state["opt_outcomes"]] == [1, 2]
     assert res.state["opt_stop_reason"].startswith("patience")
     assert ch2.gates == ["result"]
+
+
+def test_failed_baseline_benchmark_skips_optimizer_not_the_run(
+    tmp_path: Path, fake: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pilot-2 M5: the baseline benchmark timed out (600 s) and crashed the whole run."""
+    from r2r.harness.bench import BenchFailed
+
+    _script(fake)
+
+    def slow(*a, **kw):
+        raise BenchFailed("benchmark timed out after 600 s")
+
+    monkeypatch.setattr(nodes, "baseline", slow)
+    _, _, res = _run(tmp_path, fake, decide("approve"), decide("approve"), decide("stop"))
+    assert res.state["opt_stop_reason"] == "benchmark failed: benchmark timed out after 600 s"
+    assert not [r for r in fake.calls if r.role == "optimizer"]
+    assert "benchmark failed" in res.state["digest"].deviations

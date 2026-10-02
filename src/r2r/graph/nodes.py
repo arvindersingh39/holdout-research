@@ -37,6 +37,7 @@ from r2r.graph.gates import GateRequest, gate_request
 from r2r.graph.render import render, render_attempts, render_files
 from r2r.graph.routing import is_material_change, mark_done, next_milestone
 from r2r.graph.state import PipelineState
+from r2r.harness.bench import BenchFailed
 from r2r.harness.checks import run_checks
 from r2r.harness.frozen import FrozenTamper, freeze, restore
 from r2r.harness.gitops import Git
@@ -308,14 +309,17 @@ def opt_baseline(state: PipelineState, deps: RunDeps) -> Update:
     if ms.bench is None:
         return reset | {"opt_stop_reason": "no benchmark", "opt_baseline_s": None}
     m = _milestone(state)
-    b = baseline(
-        deps.workspace(),
-        deps.sandbox(),
-        ms.bench.entrypoint,
-        deps.settings.budgets,
-        run_id=deps.run_id,
-        milestone_id=m.id,
-    )
+    try:
+        b = baseline(
+            deps.workspace(),
+            deps.sandbox(),
+            ms.bench.entrypoint,
+            deps.settings.budgets,
+            run_id=deps.run_id,
+            milestone_id=m.id,
+        )
+    except BenchFailed as e:  # e.g. a timeout: the tests passed, so skip optimising, keep going
+        return reset | {"opt_stop_reason": f"benchmark failed: {e}", "opt_baseline_s": None}
     action, reason = decide([], deps.settings.budgets, _target(state, deps), b.runtime_s)
     return reset | {
         "opt_baseline_s": b.runtime_s,
