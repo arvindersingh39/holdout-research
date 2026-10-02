@@ -68,7 +68,9 @@ def get_contract_caps() -> dict[str, int]:
     if _caps is None:
         from r2r.settings import load_settings
 
-        _caps = dict(load_settings().budgets.contract_token_caps)
+        _caps = dict(
+            load_settings(env_file=None).budgets.contract_token_caps
+        )  # caps only, no secrets
     return _caps
 
 

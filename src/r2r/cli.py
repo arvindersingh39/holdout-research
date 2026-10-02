@@ -23,6 +23,12 @@ def project_root() -> Path:
     return cwd if (cwd / "config").is_dir() else Path(__file__).resolve().parents[2]
 
 
+def project_settings() -> Settings:
+    """Config and secrets for the CLI. Tests replace this so the real `.env` is never read."""
+    root = project_root()
+    return load_settings(root / "config", root / ".env")
+
+
 def make_client(settings: Settings) -> LLMClient:
     """The real LLM client. Tests replace this with FakeLLM."""
     return LiteLLMClient(settings.secrets)
@@ -61,7 +67,7 @@ def ingest(
         console.print(f"[red]{proposal}/proposal.md not found[/]")
         raise typer.Exit(2)
     root = project_root()
-    settings = load_settings(root / "config", root / ".env")
+    settings = project_settings()
     configure_logging("WARNING", settings.secrets)
     run_id = run_id or f"{proposal.resolve().name}-{datetime.now():%Y%m%d-%H%M%S}"
     paths = run_paths(run_id, base=runs_base or root, create=True)
@@ -105,7 +111,7 @@ def _deps(run_id: str, runs_base: Path | None, proposal: Path | None = None):
     from r2r.log import configure_logging
 
     root = project_root()
-    settings = load_settings(root / "config", root / ".env")
+    settings = project_settings()
     configure_logging("WARNING", settings.secrets)
     base = runs_base or root
     if proposal is not None:
@@ -305,7 +311,7 @@ def bot(
     from r2r.whatsapp.webhook import create_app
 
     root = project_root()
-    settings = load_settings(root / "config", root / ".env")
+    settings = project_settings()
     configure_logging("INFO", settings.secrets)
     s = settings.secrets
     if not (_whatsapp_ready(settings) and s.whatsapp_app_secret and s.whatsapp_verify_token):
@@ -371,8 +377,7 @@ def sandbox_check() -> None:
     from r2r.harness.workspace import Workspace
     from r2r.store.runs import run_paths
 
-    root = project_root()
-    limits = load_settings(root / "config", root / ".env").budgets.sandbox
+    limits = project_settings().budgets.sandbox
     # Docker Desktop may still hold the read-only mounts for a moment after a container exits,
     # so cleanup of this throwaway workspace must not fail the check.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
