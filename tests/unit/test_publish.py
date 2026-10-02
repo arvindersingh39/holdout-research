@@ -125,3 +125,12 @@ def test_render_paper() -> None:
     assert r"\section{Introduction}" in tex and r"\includegraphics" in tex
     assert "figures/binder.png" in tex and "partial" in tex.lower()
     assert r"\section{Related work}" not in tex  # missing sections are skipped
+
+
+def test_collect_finds_math_spec_after_result_gate_reset() -> None:
+    """Approving a result resets math_spec and baselines but keeps the digest."""
+    rm = roadmap()
+    during = {"roadmap": rm, "digest": _digest("M1", 0.4), "math_spec": math_spec()}
+    after_reset = {"roadmap": _done(rm, "M1"), "digest": _digest("M1", 0.4), "math_spec": None}
+    rec = collect_from_states([after_reset, during])
+    assert rec.milestones[0].math_spec is not None

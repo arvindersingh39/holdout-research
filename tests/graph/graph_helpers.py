@@ -75,6 +75,7 @@ def make_deps(
     settings=None,
     overseer: bool = False,
     overseer_max_calls: int | None = None,
+    publish_modes: tuple[str, ...] = (),
 ) -> RunDeps:
     """The overseer (Phase 7c) is off unless a test turns it on: it adds LLM calls to script."""
     settings = settings or load_settings(REPO / "config", env_file=None)
@@ -85,7 +86,10 @@ def make_deps(
             "max_calls_milestone": overseer_max_calls or b.overseer.max_calls_milestone,
         }
     )
-    settings = settings.model_copy(update={"budgets": b.model_copy(update={"overseer": ov})})
+    pub = b.publish.model_copy(update={"modes": list(publish_modes)})  # off unless a test asks
+    settings = settings.model_copy(
+        update={"budgets": b.model_copy(update={"overseer": ov, "publish": pub})}
+    )
     if create:
         return RunDeps.create(
             run_id,

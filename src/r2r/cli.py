@@ -273,6 +273,47 @@ def show(
 
 
 @app.command()
+def publish(
+    run_id: str,
+    mode: Annotated[
+        str | None, typer.Option(help="paper or package (default: both, from budgets.yaml)")
+    ] = None,
+    note: Annotated[str | None, typer.Option(help="A revision request for the writer")] = None,
+    runs_base: RunsBase = None,
+) -> None:
+    """Build the paper and/or package from the run's finished milestones (calls the writer)."""
+    from rich.markdown import Markdown
+
+    from r2r.graph.driver import open_graph
+    from r2r.publish.collect import NothingToPublish, collect_run
+    from r2r.publish.run import run_publish
+
+    deps = _deps(run_id, runs_base)
+    modes = [mode] if mode else deps.settings.budgets.publish.modes
+    if not set(modes) <= {"paper", "package"}:
+        console.print("[red]--mode must be paper or package[/]")
+        raise typer.Exit(2)
+    with open_graph(deps) as graph:
+        try:
+            record = collect_run(graph, run_id)
+        except NothingToPublish as e:
+            console.print(f"[red]{e}[/]")
+            raise typer.Exit(1) from e
+    with console.status("Publishing..."):
+        _, md = run_publish(
+            record,
+            deps.workspace(),
+            deps.paths.root / "publish",
+            deps.sandbox_for,
+            deps.ctx(),
+            deps.blobs,
+            modes,
+            note=note,
+        )
+    console.print(Markdown(md))
+
+
+@app.command()
 def costs(run_id: str, runs_base: RunsBase = None) -> None:
     """Spend by role, model and milestone, with cache-read share."""
     from rich.table import Table

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +33,8 @@ class RunDeps:
     # Docker in production; the framework tests inject an unisolated backend (D29).
     sandbox_factory: Callable[[Workspace], SandboxBackend] | None = None
     search_client: Any = None
+    # set by open_graph: the run's earlier states, newest first (publishing reads past milestones)
+    state_history: Callable[[], Iterable[Mapping[str, Any]]] | None = None
     ledger: Ledger = field(init=False)
     blobs: BlobStore = field(init=False)
     index: VectorIndex = field(init=False)

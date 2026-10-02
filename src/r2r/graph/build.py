@@ -42,6 +42,7 @@ GATES: dict[GateKind, Callable] = {
     "budget": nodes.budget_gate,
     "dispute": nodes.dispute_gate,
     "result": nodes.result_gate,
+    "publication": nodes.publication_gate,
 }
 
 # Nodes that call an LLM: a BudgetExceeded there routes to the budget gate (D46). The optimizer
@@ -56,6 +57,7 @@ GUARDED = (
     "code",
     "revise_test",
     "digest",
+    "publish",
     "oversee_plan",
     "oversee_spec",
     "oversee_design",
@@ -160,6 +162,14 @@ def _after_optimize(state: PipelineState) -> str:
     return route_after_optimize(bool(state.get("tamper")), state.get("opt_stop_reason"))
 
 
+def _after_publication(state: PipelineState) -> str:
+    """One revision pass with the owner's note (Phase 8); then approve or stop."""
+    d = state["human_decision"]
+    if d.action == "redirect" and state.get("publish_revisions", 0) <= 1:
+        return "publish"
+    return END
+
+
 def _after_gate(state: PipelineState, gate: GateKind) -> str:
     return route_after_gate(gate, state["human_decision"])
 
@@ -184,6 +194,7 @@ def build_graph(deps: RunDeps) -> StateGraph:
             for hook in HOOKS.values()
         },
         "finish": nodes.finish,
+        "publish": nodes.publish,
     }
     for name, fn in work.items():
         node = _guard(name, fn, deps) if name in GUARDED else partial(fn, deps=deps)
@@ -255,8 +266,12 @@ def build_graph(deps: RunDeps) -> StateGraph:
     }
     for kind, dests in targets.items():
         g.add_conditional_edges(f"{kind}_gate", partial(_after_gate, gate=kind), dests)
+    g.add_conditional_edges("publication_gate", _after_publication, ["publish", END])
     g.add_conditional_edges("budget_gate", _after_budget_gate, [*GUARDED, END])
-    g.add_edge("finish", END)
+    g.add_conditional_edges(
+        "finish", lambda s: "publish" if b.publish.modes else END, ["publish", END]
+    )
+    edge("publish", lambda s: "publication_gate", ["publication_gate"])
     return g
 
 
@@ -275,6 +290,11 @@ def open_graph(deps: RunDeps) -> Iterator[CompiledStateGraph]:
     conn = sqlite3.connect(str(deps.paths.checkpoints), check_same_thread=False)
     try:
         saver = SqliteSaver(conn, serde=serializer())
-        yield build_graph(deps).compile(checkpointer=saver)
+        graph = build_graph(deps).compile(checkpointer=saver)
+        deps.state_history = lambda: (
+            snap.values
+            for snap in graph.get_state_history({"configurable": {"thread_id": deps.run_id}})
+        )
+        yield graph
     finally:
         conn.close()

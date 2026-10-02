@@ -49,6 +49,8 @@ from r2r.harness.stoprule import decide
 from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
 from r2r.ingest.proposal import ingest_proposal
 from r2r.llm.gateway import BudgetExceeded, ContractViolation
+from r2r.publish.collect import collect_from_states
+from r2r.publish.run import run_publish
 from r2r.retrieval.context_pack import build_pack
 
 Update = dict[str, Any]
@@ -442,6 +444,39 @@ def digest(state: PipelineState, deps: RunDeps) -> Update:
 
 def finish(state: PipelineState, deps: RunDeps) -> Update:
     return {"status": "complete"}
+
+
+def publish(state: PipelineState, deps: RunDeps) -> Update:
+    """Phase 8: paper and package from every finished milestone's contracts."""
+    history = deps.state_history() if deps.state_history else []
+    record = collect_from_states([state, *history])
+    bundles, md = run_publish(
+        record,
+        deps.workspace(),
+        deps.paths.root / "publish",
+        deps.sandbox_for,
+        deps.ctx(),
+        deps.blobs,
+        deps.settings.budgets.publish.modes,
+        note=state.get("publish_note"),
+    )
+    return {"publication": bundles, "publication_md": md, "publish_note": None}
+
+
+def publication_gate(state: PipelineState, deps: RunDeps) -> Update:
+    revisions = state.get("publish_revisions", 0)
+    md = state.get("publication_md") or "Nothing was published."
+    if revisions >= 1:
+        md += "\n\nThe one revision pass is used: approve, or stop and run `r2r publish` again."
+    d = _ask(
+        state, deps, GateRequest(gate="publication", title="Review the publication", markdown=md)
+    )
+    update: Update = {"human_decision": d}
+    if d.action == "stop":
+        return update | {"status": "stopped"}
+    if d.action == "redirect":
+        return update | {"publish_note": d.note, "publish_revisions": revisions + 1}
+    return update | {"status": "complete"}
 
 
 # --- gates -----------------------------------------------------------------------------

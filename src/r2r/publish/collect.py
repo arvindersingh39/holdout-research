@@ -50,23 +50,29 @@ def collect_from_states(states: Iterable[Mapping[str, Any]]) -> RunRecord:
     roadmap: Roadmap | None = None
     brief: ResearchBrief | None = None
     title = ""
-    found: dict[str, tuple[ResultDigest, MathSpec | None, list[BaselineCard]]] = {}
-    for s in states:
+    digests: dict[str, ResultDigest] = {}
+    specs: dict[str, MathSpec] = {}
+    cards: dict[str, list[BaselineCard]] = {}
+    for s in states:  # newest first: the first value seen for a milestone wins
         roadmap = roadmap or s.get("roadmap")
         brief = brief or s.get("brief")
         title = title or (s["proposal"].title if s.get("proposal") is not None else "")
-        d = s.get("digest")
-        if d is None or d.milestone_id in found:
-            continue
-        ms = s.get("math_spec")
-        found[d.milestone_id] = (
-            d,
-            ms if ms is not None and ms.milestone_id == d.milestone_id else None,
-            [b for b in s.get("baselines") or [] if b.milestone_id == d.milestone_id],
-        )
-    if roadmap is None or not found:
+        if (d := s.get("digest")) is not None:
+            digests.setdefault(d.milestone_id, d)
+        if (ms := s.get("math_spec")) is not None:  # reset to None once a result is approved
+            specs.setdefault(ms.milestone_id, ms)
+        for b in s.get("baselines") or []:
+            if b.milestone_id not in cards:
+                cards[b.milestone_id] = [
+                    x for x in s["baselines"] if x.milestone_id == b.milestone_id
+                ]
+    if roadmap is None or not digests:
         raise NothingToPublish("no finished milestone in this run yet")
-    records = [MilestoneRecord(m, *found[m.id]) for m in roadmap.milestones if m.id in found]
+    records = [
+        MilestoneRecord(m, digests[m.id], specs.get(m.id), cards.get(m.id, []))
+        for m in roadmap.milestones
+        if m.id in digests
+    ]
     return RunRecord(roadmap=roadmap, brief=brief, milestones=records, title=title)
 
 

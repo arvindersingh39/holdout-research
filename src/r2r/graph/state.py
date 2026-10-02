@@ -15,6 +15,7 @@ from r2r.contracts import (
     OversightFlag,
     ProfileReport,
     Proposal,
+    PublicationBundle,
     ResearchBrief,
     ResultDigest,
     Roadmap,
@@ -64,6 +65,10 @@ class PipelineState(TypedDict, total=False):
     ]  # planner briefings from a result review, for the next milestone
     flags: list[OversightFlag]  # overseer flags for this milestone, shown at gates
     oversee_calls: int  # overseer calls for the current milestone
+    publication: list[PublicationBundle]  # Phase 8: one per mode
+    publication_md: str | None  # what the publication gate shows
+    publish_note: str | None  # the owner's revision request
+    publish_revisions: int
     human_note: str | None  # a redirect note waiting for the long-term planner
     budget_blocked: str | None  # node that hit BudgetExceeded (D46)
     budget_message: str | None
