@@ -17,7 +17,7 @@ from r2r.store.runs import run_paths
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURE = REPO / "tests" / "fixtures" / "slow_project"
-CFG = load_settings(REPO / "config", env_file=None).budgets
+CFG = load_settings(REPO / "tests" / "fixtures" / "config", env_file=None).budgets
 META = {"run_id": "run-test", "milestone_id": "M1"}
 ENTRY = "bench/bench_main.py"
 

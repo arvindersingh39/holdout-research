@@ -22,7 +22,7 @@ from r2r.publish.collect import MilestoneRecord, RunRecord
 
 pytestmark = pytest.mark.docker
 REPO = Path(__file__).resolve().parents[2]
-SETTINGS = load_settings(REPO / "config", env_file=None)
+SETTINGS = load_settings(REPO / "tests" / "fixtures" / "config", env_file=None)
 PLOT = (
     "import matplotlib; matplotlib.use('Agg')\n"
     "import matplotlib.pyplot as plt\n"

@@ -23,7 +23,7 @@ from r2r.settings import load_settings
 
 
 def _settings(**budgets):
-    s = load_settings(REPO / "config", env_file=None)
+    s = load_settings(REPO / "tests" / "fixtures" / "config", env_file=None)
     return s.model_copy(update={"budgets": s.budgets.model_copy(update=budgets)})
 
 

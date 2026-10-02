@@ -34,7 +34,7 @@ def _digest(mid: str, runtime: float):
 
 
 def test_config_and_contract() -> None:
-    p = load_settings(REPO / "config", None).budgets.publish
+    p = load_settings(REPO / "tests" / "fixtures" / "config", None).budgets.publish
     assert p.modes == ["paper", "package"] and p.fix_attempts == 1 and p.log_tail_lines == 40
     s = PaperSection(created_by="writer", run_id="r", name="method", latex="x", cites=["a"])
     assert s.name == "method"

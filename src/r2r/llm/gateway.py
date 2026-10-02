@@ -97,30 +97,9 @@ def call_structured[C: BaseModel](
         _user_message(payload),
     ]
 
-    native = ctx.client.supports_response_schema(model)
+    native = ctx.client.supports_response_schema(model) and model not in _SCHEMA_REJECTED
     tool_name = "submit_" + re.sub(r"(?<!^)(?=[A-Z])", "_", output_model.__name__).lower()
-    structured: dict[str, Any] = (
-        {
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": output_model.__name__, "schema": schema},
-            }
-        }
-        if native
-        else {
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool_name,
-                        "description": f"Submit the {output_model.__name__}.",
-                        "parameters": schema,
-                    },
-                }
-            ],
-            "tool_choice": {"type": "function", "function": {"name": tool_name}},
-        }
-    )
+    structured = _structured_args(native, output_model.__name__, tool_name, schema)
     meta = {"created_by": role, "run_id": ctx.run_id, "milestone_id": ctx.milestone_id}
 
     error = ""
@@ -134,7 +113,28 @@ def call_structured[C: BaseModel](
             extra=extra,
             **structured,
         )
-        raw = _raw_output(_invoke(req, ctx), native)
+        try:
+            resp = _invoke(req, ctx)
+        except LLMCallError as e:
+            if not (native and _is_schema_rejection(e)):
+                raise
+            # strict providers (OpenAI) refuse schemas with optional fields; a forced tool call
+            # carries the same schema without that rule. Remembered per model for this process.
+            _SCHEMA_REJECTED.add(model)
+            log.warning("schema rejected; using a forced tool call", extra={"model": model})
+            native = False
+            structured = _structured_args(native, output_model.__name__, tool_name, schema)
+            req = LLMRequest(
+                role=role,
+                model=model,
+                messages=list(messages),
+                max_tokens=max_out,
+                thinking=thinking,
+                extra=extra,
+                **structured,
+            )
+            resp = _invoke(req, ctx)
+        raw = _raw_output(resp, native)
         try:
             parsed = _parse(raw, output_model, meta, model)
             return finalize(parsed) if finalize is not None else parsed
@@ -148,6 +148,37 @@ def call_structured[C: BaseModel](
                 {"role": "user", "content": REPAIR.format(error=error)},
             ]
     raise ContractViolation(f"{role}: {output_model.__name__} still invalid after repair: {error}")
+
+
+_SCHEMA_REJECTED: set[str] = set()  # models whose provider refused our response_format schema
+
+
+def _is_schema_rejection(e: Exception) -> bool:
+    msg = str(e).lower()
+    return "response_format" in msg and "schema" in msg
+
+
+def _structured_args(native: bool, name: str, tool_name: str, schema: Any) -> dict[str, Any]:
+    if native:
+        return {
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": name, "schema": schema},
+            }
+        }
+    return {
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": f"Submit the {name}.",
+                    "parameters": schema,
+                },
+            }
+        ],
+        "tool_choice": {"type": "function", "function": {"name": tool_name}},
+    }
 
 
 def run_tool_loop(

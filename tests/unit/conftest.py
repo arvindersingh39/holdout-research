@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 @pytest.fixture
 def settings() -> Settings:
-    return load_settings(REPO / "config", env_file=None)
+    return load_settings(REPO / "tests" / "fixtures" / "config", env_file=None)
 
 
 @pytest.fixture

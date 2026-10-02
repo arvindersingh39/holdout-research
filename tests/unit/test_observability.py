@@ -135,7 +135,7 @@ def test_costs_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     deps = RunDeps.create(
         "c1",
         repo / "examples/pilot_mc_pricer",
-        load_settings(repo / "config", env_file=None),
+        load_settings(repo / "tests" / "fixtures" / "config", env_file=None),
         FakeLLM(),
         tmp_path,
         repo / "prompts",

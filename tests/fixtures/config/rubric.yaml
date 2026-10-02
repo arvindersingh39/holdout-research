@@ -1,0 +1,12 @@
+# Coordinator criteria, each scored pass or fail with a one-line reason.
+criteria:
+  - id: R1
+    text: The spec covers every acceptance criterion of the milestone.
+  - id: R2
+    text: The milestone's dependencies are done.
+  - id: R3
+    text: "Interfaces are concrete: names, signatures, array shapes and units."
+  - id: R4
+    text: The work plausibly fits usd_cap_milestone.
+  - id: R5
+    text: The spec is consistent with the roadmap rationale and adds no scope.

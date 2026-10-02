@@ -15,4 +15,8 @@ def _no_real_secrets(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
     # The CLI reads the project's .env; its keys would build real clients (paid Tavily searches,
     # real Langfuse traces) inside offline tests.
     if "live" not in request.node.path.parts:
-        monkeypatch.setattr(cli, "project_settings", lambda: load_settings(REPO / "config", None))
+        monkeypatch.setattr(
+            cli,
+            "project_settings",
+            lambda: load_settings(REPO / "tests" / "fixtures" / "config", None),
+        )

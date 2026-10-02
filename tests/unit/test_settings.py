@@ -10,7 +10,7 @@ import yaml
 from r2r.settings import ROLES, Secrets, Settings, SettingsError, load_settings
 
 REPO = Path(__file__).resolve().parents[2]
-CONFIG = REPO / "config"
+CONFIG = REPO / "tests" / "fixtures" / "config"  # pinned copy; the owner tunes config/ (D70)
 
 
 @pytest.fixture
@@ -24,6 +24,17 @@ def _edit(path: Path, mutate) -> None:
     data = yaml.safe_load(path.read_text())
     mutate(data)
     path.write_text(yaml.safe_dump(data))
+
+
+def test_owner_config_is_valid() -> None:
+    """The live config/ the owner edits must load and cover every role, whatever its values."""
+    s = load_settings(REPO / "config", env_file=None)
+    assert set(s.models.roles) == set(ROLES)
+    for role, cfg in s.models.roles.items():
+        provider, _, rest = cfg.model.partition("/")
+        assert provider in ("anthropic", "openrouter", "gemini", "local"), (role, cfg.model)
+        if provider == "openrouter":  # openrouter/<vendor>/<model>, e.g. openrouter/openai/...
+            assert rest.count("/") >= 1, f"{role}: {cfg.model} is missing the vendor part"
 
 
 def test_repo_config_loads() -> None:

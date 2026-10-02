@@ -78,7 +78,7 @@ def make_deps(
     publish_modes: tuple[str, ...] = (),
 ) -> RunDeps:
     """The overseer (Phase 7c) is off unless a test turns it on: it adds LLM calls to script."""
-    settings = settings or load_settings(REPO / "config", env_file=None)
+    settings = settings or load_settings(REPO / "tests" / "fixtures" / "config", env_file=None)
     b = settings.budgets
     ov = b.overseer.model_copy(
         update={

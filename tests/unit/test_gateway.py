@@ -351,3 +351,38 @@ def test_finalize_overflow_twice_is_contract_violation(ctx: CallContext, fake: F
         call_structured(
             "long_planner", "long_planner", research_brief(), Roadmap, ctx, finalize=finalize
         )
+
+
+# --- strict schema providers (study-1: OpenAI rejected the MilestoneSpecDraft schema) -----------
+
+
+def test_schema_rejection_falls_back_to_forced_tool_call(ctx: CallContext) -> None:
+    from r2r.llm import gateway
+    from r2r.llm.client import LLMCallError
+
+    fake = FakeLLM(native_schema=True)
+    ctx = CallContext(**{**ctx.__dict__, "client": fake})
+    rejection = LLMCallError(
+        "BadRequestError: Invalid schema for response_format 'Roadmap': In context=(), "
+        "'required' is required to be supplied and to be an array including every key"
+    )
+    fake.script("long_planner", rejection, roadmap(), roadmap())
+    model = ctx.settings.models.roles["long_planner"].model
+    gateway._SCHEMA_REJECTED.discard(model)
+    assert _call(ctx).goal == roadmap().goal
+    first, second = fake.calls
+    assert first.response_format is not None and first.tools is None
+    assert second.response_format is None and second.tool_choice["function"]["name"]
+    _call(ctx)  # the model is remembered: no second rejection round-trip
+    assert fake.calls[2].response_format is None
+    gateway._SCHEMA_REJECTED.discard(model)
+
+
+def test_other_bad_requests_are_not_swallowed(ctx: CallContext) -> None:
+    from r2r.llm.client import LLMCallError
+
+    fake = FakeLLM(native_schema=True)
+    ctx = CallContext(**{**ctx.__dict__, "client": fake})
+    fake.script("long_planner", LLMCallError("BadRequestError: context length exceeded"))
+    with pytest.raises(LLMCallError, match="context length"):
+        _call(ctx)

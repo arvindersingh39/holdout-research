@@ -12,7 +12,7 @@ from r2r.settings import BudgetsConfig, load_settings
 
 REPO = Path(__file__).resolve().parents[2]
 # min_gain 5%, patience 2, max attempts 4
-CFG: BudgetsConfig = load_settings(REPO / "config", env_file=None).budgets
+CFG: BudgetsConfig = load_settings(REPO / "tests" / "fixtures" / "config", env_file=None).budgets
 
 
 def _outcome(n: int, before: float, after: float | None, accepted: bool) -> OptimizationOutcome:
