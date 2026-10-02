@@ -42,7 +42,12 @@ def test_arxiv_paper_compiles_offline_with_figure(tmp_path: Path) -> None:
         s("abstract", r"We measure $|m|$ with 4 standard errors \& more."),
         s("introduction", r"Monte Carlo, see \cite{glasserman2003}."),
         s("related_work", r"\citet{glasserman2003} covers variance reduction."),
-        s("method", r"\begin{equation} m = (1-\sinh(2/T)^{-4})^{1/8} \end{equation}"),
+        s(
+            "method",
+            r"\begin{itemize}\item One.\item Two \textdegree{} \textmu{} \texttimes{}.\end{itemize}"
+            r"\begin{enumerate}\item A.\end{enumerate}"
+            r"\begin{equation} m = (1-\sinh(2/T)^{-4})^{1/8} \end{equation}",
+        ),
         s("experiments", r"Figure~\ref{fig:magnetization} shows runtime 0.41 s."),
         s("conclusion", "Done."),
     )

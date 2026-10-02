@@ -79,6 +79,26 @@ def bibliography(entries: list[BibEntry]) -> str:
     return "\\begin{thebibliography}{99}\n" + items + "\n\\end{thebibliography}"
 
 
+def check_braces(latex: str) -> None:
+    """Raise ValueError if `{` and `}` don't balance (escaped braces and comments ignored)."""
+    depth = 0
+    for line in latex.splitlines():
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "%":
+                break
+            depth += {"{": 1, "}": -1}.get(ch, 0)
+            if depth < 0:
+                raise ValueError("unbalanced braces: a `}` closes nothing")
+            i += 1
+    if depth:
+        raise ValueError(f"unbalanced braces: {depth} `{{` never closed")
+
+
 def cited_keys(latex: str) -> set[str]:
     return {k.strip() for m in _CITE.finditer(latex) for k in m.group(1).split(",") if k.strip()}
 

@@ -134,3 +134,23 @@ def test_collect_finds_math_spec_after_result_gate_reset() -> None:
     after_reset = {"roadmap": _done(rm, "M1"), "digest": _digest("M1", 0.4), "math_spec": None}
     rec = collect_from_states([after_reset, during])
     assert rec.milestones[0].math_spec is not None
+
+
+@pytest.mark.parametrize(
+    ("latex", "ok"),
+    [
+        (r"\emph{a} and $\frac{1}{2}$", True),
+        (r"50\% and \{set\}", True),  # escaped braces don't count
+        (r"\emph{met* here", False),
+        (r"a} b", False),
+        (r"x % a { in a comment" + "\n" + "y", True),
+    ],
+)
+def test_check_braces(latex: str, ok: bool) -> None:
+    from r2r.publish.latex import check_braces
+
+    if ok:
+        check_braces(latex)
+    else:
+        with pytest.raises(ValueError, match="unbalanced braces"):
+            check_braces(latex)

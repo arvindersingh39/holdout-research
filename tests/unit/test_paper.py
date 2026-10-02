@@ -131,3 +131,13 @@ def test_related_work_skipped_without_papers(ctx, fake, ws, tmp_path) -> None:
     )
     res = build_paper(_record(), [], ws, tmp_path / "p", lambda w: FakeTeX(w), ctx)
     assert res.sections == ["abstract", "introduction", "method", "experiments", "conclusion"]
+
+
+def test_unbalanced_braces_go_back_to_the_writer(ctx: CallContext, fake: FakeLLM) -> None:
+    """pilot-2: the writer typed \\emph{met* and the paper failed to compile."""
+    fake.script(
+        "writer", sec("conclusion", r"All \emph{met* here."), sec("conclusion", r"All \emph{met}.")
+    )
+    s = write_section("conclusion", "T", "data", {}, ctx, partial=False)
+    assert s.latex == r"All \emph{met}."
+    assert "unbalanced braces" in str(fake.calls[1].messages)

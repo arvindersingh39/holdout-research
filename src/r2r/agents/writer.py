@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from r2r.contracts import PaperSection
 from r2r.llm.gateway import CallContext, call_structured
-from r2r.publish.latex import check_cites, cited_keys
+from r2r.publish.latex import check_braces, check_cites, cited_keys
 
 ROLE = "writer"
 
@@ -52,6 +52,7 @@ def write_section(
 
     def finalize(s: PaperSection) -> PaperSection:
         check_cites(s.latex, set(cite_keys))  # ValueError -> one repair with the message
+        check_braces(s.latex)
         return s.model_copy(update={"name": section, "cites": sorted(cited_keys(s.latex))})
 
     return call_structured(ROLE, ROLE, payload, PaperSection, ctx, finalize=finalize)
