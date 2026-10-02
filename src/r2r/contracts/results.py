@@ -47,3 +47,14 @@ class PublicationBundle(Contract):
     artifacts: list[BlobRef]
     build_ok: bool
     log_tail: Lines(40, 4000) = ""
+
+
+CiteKey = Annotated[str, Field(pattern=r"^[A-Za-z0-9_:.-]{1,64}$")]
+
+
+class PaperSection(Contract):
+    """One section of the paper, written by #7 from that section's inputs only (D65)."""
+
+    name: Literal["abstract", "introduction", "related_work", "method", "experiments", "conclusion"]
+    latex: Text(12000, 1)
+    cites: Annotated[list[CiteKey], Field(max_length=40)] = []

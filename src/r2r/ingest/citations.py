@@ -16,7 +16,7 @@ _VENUE_FIELD = {
 }
 
 
-def _escape(text: str) -> str:
+def escape_latex(text: str) -> str:
     text = text.replace("\\", r"\textbackslash{}")
     text = _SPECIALS.sub(r"\\\1", text).replace(r"\textbackslash\{\}", r"\textbackslash{}")
     return text.replace("~", r"\textasciitilde{}").replace("^", r"\textasciicircum{}")
@@ -28,13 +28,13 @@ def _raw(text: str) -> str:
 
 
 def _entry(c: Citation, key: str) -> str:
-    fields = [("title", _escape(c.title))]
+    fields = [("title", escape_latex(c.title))]
     if c.authors:
-        fields.append(("author", " and ".join(_escape(a) for a in c.authors)))
+        fields.append(("author", " and ".join(escape_latex(a) for a in c.authors)))
     if c.year is not None:
         fields.append(("year", str(c.year)))
     if c.venue:
-        fields.append((_VENUE_FIELD.get(c.entry_type, "howpublished"), _escape(c.venue)))
+        fields.append((_VENUE_FIELD.get(c.entry_type, "howpublished"), escape_latex(c.venue)))
     if c.doi:
         fields.append(("doi", _raw(c.doi)))
     if c.url:

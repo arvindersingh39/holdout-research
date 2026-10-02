@@ -132,6 +132,15 @@ class OverseerLimits(_Strict):
     evidence_chars: PositiveInt  # cap per evidence item the overseer reads
 
 
+class PublishLimits(_Strict):
+    """Phase 8 (D67): paper and package output."""
+
+    modes: list[Literal["paper", "package"]]
+    fix_attempts: Annotated[int, Field(ge=0, le=3)]  # writer fixes after a failed LaTeX compile
+    log_tail_lines: PositiveInt  # compile-log lines sent back to the writer
+    compile_timeout_s: PositiveInt
+
+
 class ContextPackTokens(_Strict):
     short_planner: PositiveInt
     math_designer: PositiveInt
@@ -173,6 +182,7 @@ class BudgetsConfig(_Strict):
     context_pack: ContextPackLimits
     baselines: BaselineLimits
     overseer: OverseerLimits
+    publish: PublishLimits
     gates: GatesConfig
     contract_token_caps: dict[str, PositiveInt]
 

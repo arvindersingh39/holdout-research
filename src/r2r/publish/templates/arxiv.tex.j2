@@ -1,0 +1,45 @@
+%% r2r arXiv-style preprint (D66). Rendered with \VAR{} / \BLOCK{} delimiters.
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{authblk}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[numbers]{natbib}
+\usepackage{hyperref}
+
+\title{\VAR{title}}
+\BLOCK{for a in authors}
+\author{\VAR{a}}
+\BLOCK{endfor}
+\date{\today}
+
+\begin{document}
+\maketitle
+\BLOCK{if partial}
+\begin{center}\fbox{\parbox{0.9\linewidth}{\small Partial report: not every planned milestone
+is complete. Results cover the finished milestones only.}}\end{center}
+\BLOCK{endif}
+\BLOCK{if sections.abstract}
+\begin{abstract}
+\VAR{sections.abstract}
+\end{abstract}
+\BLOCK{endif}
+\BLOCK{for key, heading in headings}
+\BLOCK{if sections[key]}
+\section{\VAR{heading}}
+\VAR{sections[key]}
+\BLOCK{if key == "experiments"}
+\BLOCK{include "figures.tex.j2"}
+\BLOCK{endif}
+\BLOCK{endif}
+\BLOCK{endfor}
+\BLOCK{if not sections.experiments}
+\BLOCK{include "figures.tex.j2"}
+\BLOCK{endif}
+
+\VAR{bib}
+\end{document}

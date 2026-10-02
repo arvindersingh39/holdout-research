@@ -448,13 +448,13 @@ def finish(state: PipelineState, deps: RunDeps) -> Update:
 
 
 def _ask(state: PipelineState, deps: RunDeps, req: GateRequest) -> HumanDecision:
-    md = _render_oversight(state, deps.settings.budgets.overseer.flags_shown)
+    md = render_oversight(state, deps.settings.budgets.overseer.flags_shown)
     if md:
         req = req.model_copy(update={"markdown": f"{req.markdown}\n\n{md}"})
     return HumanDecision.model_validate(interrupt(req.model_dump()))
 
 
-def _render_oversight(state: PipelineState, flags_shown: int) -> str:
+def render_oversight(state: PipelineState, flags_shown: int) -> str:
     """Phase 7c: what the overseer currently tells each agent, and its newest flags."""
     briefings, flags = state.get("briefings") or {}, state.get("flags") or []
     if not briefings and not flags:

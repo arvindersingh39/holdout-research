@@ -24,7 +24,13 @@ from r2r.contracts.planning import (
     ResearchBrief,
     Roadmap,
 )
-from r2r.contracts.results import CriterionResult, HumanDecision, PublicationBundle, ResultDigest
+from r2r.contracts.results import (
+    CriterionResult,
+    HumanDecision,
+    PaperSection,
+    PublicationBundle,
+    ResultDigest,
+)
 
 __all__ = [
     "BaselineCard",
@@ -52,6 +58,7 @@ __all__ = [
     "OversightFlag",
     "OversightReport",
     "PaperCard",
+    "PaperSection",
     "Part",
     "ProfileReport",
     "Proposal",
