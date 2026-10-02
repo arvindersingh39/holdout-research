@@ -1,6 +1,9 @@
 """Live baseline scout (Tavily + Gemini Flash). R2R_LIVE=1, after approval. ≈14 credits + ≈$0.02."""
 
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[1] / "unit"))
 
 from samples import milestone_spec
 
@@ -24,9 +27,6 @@ AC = [
 
 
 def test_scout_finds_a_verified_baseline(tmp_path: Path) -> None:
-    import sys
-
-    sys.path.insert(0, str(REPO / "tests" / "unit"))
     settings = load_settings(REPO / "config", REPO / ".env")
     assert settings.secrets.tavily_api_key, "set TAVILY_API_KEY in .env"
     ctx = CallContext(
