@@ -59,6 +59,7 @@ GUARDED = (
     "oversee_plan",
     "oversee_spec",
     "oversee_design",
+    "oversee_design_gate",
     "oversee_code",
     "oversee_result",
 )
@@ -68,6 +69,7 @@ HOOKS = {
     "roadmap_gate": "oversee_plan",
     "scout": "oversee_spec",
     "design": "oversee_design",
+    "design_gate": "oversee_design_gate",  # the owner decides after two failed designs
     "code": "oversee_code",
     "result_gate": "oversee_result",
 }
@@ -102,7 +104,7 @@ def _via_overseer(route: Callable[[PipelineState], str], src: str, lim) -> Calla
     hooked = {
         "long_plan": {"roadmap_gate"},
         "coordinate": {"scout"},
-        "design": {"design"},
+        "design": {"design", "design_gate"},
         "code": {"code"},
         "digest": {"result_gate"},
     }[src]
@@ -178,7 +180,7 @@ def build_graph(deps: RunDeps) -> StateGraph:
         "optimize": nodes.optimize,
         "digest": nodes.digest,
         **{
-            hook: partial(nodes.oversee, point=hook.removeprefix("oversee_"))
+            hook: partial(nodes.oversee, point=hook.removeprefix("oversee_"))  # e.g. design_gate
             for hook in HOOKS.values()
         },
         "finish": nodes.finish,
@@ -218,7 +220,14 @@ def build_graph(deps: RunDeps) -> StateGraph:
     edge(
         "design",
         _via_overseer(partial(_after_design, review_tests=b.gates.review_tests), "design", ov),
-        ["tests_gate", "freeze", "design", "design_gate", "oversee_design"],
+        [
+            "tests_gate",
+            "freeze",
+            "design",
+            "design_gate",
+            "oversee_design",
+            "oversee_design_gate",
+        ],
     )
     g.add_edge("freeze", "code")
     edge(

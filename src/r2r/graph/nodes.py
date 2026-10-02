@@ -481,7 +481,7 @@ def oversee(state: PipelineState, deps: RunDeps, point: OversightPoint) -> Updat
     m = next_milestone(state["roadmap"]) if point != "plan" else None
     files: dict[str, str] = {}
     ms = state.get("math_spec")
-    if point in ("design", "code") and ms is not None:
+    if point in ("design", "design_gate", "code") and ms is not None:
         root = deps.workspace().root
         files = {p: (root / p).read_text() for p in ms.test_files if (root / p).is_file()}
     evidence = collect_evidence(state, point, files, lim.evidence_chars)

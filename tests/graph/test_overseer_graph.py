@@ -162,3 +162,32 @@ def test_overseer_budget_exceeded_goes_to_budget_gate(
     ch = FakeChannel(decide("stop"))
     _, res = _run(tmp_path, fake, ch)
     assert ch.gates == ["budget"] and res.status == "stopped"
+
+
+def test_design_gate_gets_the_overseers_read(tmp_path: Path, fake: FakeLLM) -> None:
+    """After a second failed design the owner decides; the overseer reviews first."""
+    fake.script("long_planner", ROADMAP)
+    fake.script("short_planner", SPEC)
+    fake.script("coordinator", PASS)
+    fake.script("math_designer", design(1, VACUOUS_TESTS), design(1, VACUOUS_TESTS))
+    gate_flag = {
+        "severity": "high",
+        "text": "The tests are fine; the reference is wrong.",
+        "evidence": ["E1"],
+    }
+    fake.script(
+        "overseer",
+        rep("plan"),
+        rep("spec"),
+        rep("design"),
+        rep("design_gate", flags=[gate_flag]),
+    )
+    ch = FakeChannel(decide("approve"), decide("stop"))
+    _run(tmp_path, fake, ch)
+    assert ch.gates == ["roadmap", "design"]
+    points = [
+        json.loads(r.messages[1]["content"].split("<data>")[1].split("</data>")[0])["point"]
+        for r in _calls(fake, "overseer")
+    ]
+    assert points == ["plan", "spec", "design", "design_gate"]
+    assert gate_flag["text"] in ch.requests[-1].markdown

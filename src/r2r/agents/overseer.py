@@ -65,7 +65,7 @@ def collect_evidence(
             for c in m.acceptance_criteria
         ]
     ms = state.get("math_spec")
-    if point in ("design", "code") and ms is not None:
+    if point in ("design", "design_gate", "code") and ms is not None:
         items.append(
             (
                 "math_spec",
@@ -74,7 +74,7 @@ def collect_evidence(
                 ),
             )
         )
-    if point == "design":
+    if point in ("design", "design_gate"):
         if state.get("design_feedback"):
             items.append(("design_rejection", state["design_feedback"]))
         items += [("perf_not_met_by_reference", t) for t in state.get("perf_unmet", [])]

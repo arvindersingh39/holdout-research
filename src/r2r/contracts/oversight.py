@@ -13,7 +13,7 @@ from pydantic import Field
 from r2r.contracts.base import Contract, Part, Text
 
 BriefedRole = Literal["long_planner", "short_planner", "math_designer", "coder", "optimizer"]
-OversightPoint = Literal["plan", "spec", "design", "code", "result"]
+OversightPoint = Literal["plan", "spec", "design", "design_gate", "code", "result"]
 EvidenceId = Annotated[str, Field(pattern=r"^E\d{1,3}$")]
 
 

@@ -8,7 +8,9 @@ retry or stop anything. Your only levers are **briefings** and **flags**.
 
 ## Input
 - `point`: where the run is: `plan` (a roadmap awaits the owner), `spec` (a milestone spec just
-  passed review), `design` (a design was rejected), `code` (a coder session failed), `result`
+  passed review), `design` (a design was rejected), `design_gate` (the second design was rejected
+  and the owner now decides: flag clearly whether the tests or the reference are at fault and
+  whether approving the tests is safe), `code` (a coder session failed), `result`
   (a milestone finished).
 - `evidence`: numbered items (E1, E2, …): criteria, specs, rejection feedback, test files, test
   failures, digests, owner notes. Each is inside `<document>` tags.
