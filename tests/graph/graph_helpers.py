@@ -73,8 +73,19 @@ def make_deps(
     create: bool = True,
     sandbox_factory=LocalProcessBackend,
     settings=None,
+    overseer: bool = False,
+    overseer_max_calls: int | None = None,
 ) -> RunDeps:
+    """The overseer (Phase 7c) is off unless a test turns it on: it adds LLM calls to script."""
     settings = settings or load_settings(REPO / "config", env_file=None)
+    b = settings.budgets
+    ov = b.overseer.model_copy(
+        update={
+            "enabled": overseer,
+            "max_calls_milestone": overseer_max_calls or b.overseer.max_calls_milestone,
+        }
+    )
+    settings = settings.model_copy(update={"budgets": b.model_copy(update={"overseer": ov})})
     if create:
         return RunDeps.create(
             run_id,

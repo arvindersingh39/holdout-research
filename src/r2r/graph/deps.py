@@ -68,7 +68,7 @@ class RunDeps:
         """The reference solution lives here, outside the workspace (D54)."""
         return self.paths.root / "reference" / milestone_id
 
-    def ctx(self, milestone_id: str | None = None) -> CallContext:
+    def ctx(self, milestone_id: str | None = None, briefing: str | None = None) -> CallContext:
         return CallContext(
             run_id=self.run_id,
             milestone_id=milestone_id,
@@ -77,6 +77,7 @@ class RunDeps:
             client=self.client,
             prompts_dir=self.prompts_dir,
             retry_wait_max_s=self.retry_wait_max_s,
+            briefing=briefing,
         )
 
     @classmethod

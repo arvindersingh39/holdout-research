@@ -56,7 +56,21 @@ GUARDED = (
     "code",
     "revise_test",
     "digest",
+    "oversee_plan",
+    "oversee_spec",
+    "oversee_design",
+    "oversee_code",
+    "oversee_result",
 )
+
+# Phase 7c: where Python routes through the overseer, and where each hook continues.
+HOOKS = {
+    "roadmap_gate": "oversee_plan",
+    "scout": "oversee_spec",
+    "design": "oversee_design",
+    "code": "oversee_code",
+    "result_gate": "oversee_result",
+}
 
 
 def _guard(name: str, fn: Callable, deps: RunDeps) -> Callable:
@@ -80,6 +94,25 @@ def _after_budget_gate(state: PipelineState) -> str:
     if state["human_decision"].action == "stop":
         return END
     return state.get("budget_retry") or "long_plan"
+
+
+def _via_overseer(route: Callable[[PipelineState], str], src: str, lim) -> Callable:
+    """Send `src`'s next step through its overseer hook when enabled and under the call cap.
+    Only the hook's own edge returns to the original target: the overseer never routes."""
+    hooked = {
+        "long_plan": {"roadmap_gate"},
+        "coordinate": {"scout"},
+        "design": {"design"},
+        "code": {"code"},
+        "digest": {"result_gate"},
+    }[src]
+
+    def r(state: PipelineState) -> str:
+        target = route(state)
+        on = lim.enabled and state.get("oversee_calls", 0) < lim.max_calls_milestone
+        return HOOKS[target] if on and target in hooked else target
+
+    return r
 
 
 def _after_long_plan(state: PipelineState) -> str:
@@ -144,6 +177,10 @@ def build_graph(deps: RunDeps) -> StateGraph:
         "opt_baseline": nodes.opt_baseline,
         "optimize": nodes.optimize,
         "digest": nodes.digest,
+        **{
+            hook: partial(nodes.oversee, point=hook.removeprefix("oversee_"))
+            for hook in HOOKS.values()
+        },
         "finish": nodes.finish,
     }
     for name, fn in work.items():
@@ -159,31 +196,44 @@ def build_graph(deps: RunDeps) -> StateGraph:
             g.add_conditional_edges(src, route, targets)
 
     b = deps.settings.budgets
+    ov = b.overseer
+    for target, hook in HOOKS.items():
+        edge(hook, lambda s, t=target: t, [target])
     g.add_edge(START, "retrieve")
     edge("retrieve", lambda s: "long_plan", ["long_plan"])
-    edge("long_plan", _after_long_plan, ["finish", "roadmap_gate", "short_plan"])
+    edge(
+        "long_plan",
+        _via_overseer(_after_long_plan, "long_plan", ov),
+        ["finish", "roadmap_gate", "short_plan", "oversee_plan"],
+    )
     edge("short_plan", lambda s: "coordinate", ["coordinate"])
     edge(
         "coordinate",
-        partial(_after_coordinate, max_rounds=b.coordinator_max_revise_rounds),
-        ["scout", "short_plan", "long_plan", "escalation_gate"],
+        _via_overseer(
+            partial(_after_coordinate, max_rounds=b.coordinator_max_revise_rounds), "coordinate", ov
+        ),
+        ["scout", "short_plan", "long_plan", "escalation_gate", "oversee_spec"],
     )
     edge("scout", lambda s: "design", ["design"])
     edge(
         "design",
-        partial(_after_design, review_tests=b.gates.review_tests),
-        ["tests_gate", "freeze", "design", "design_gate"],
+        _via_overseer(partial(_after_design, review_tests=b.gates.review_tests), "design", ov),
+        ["tests_gate", "freeze", "design", "design_gate", "oversee_design"],
     )
     g.add_edge("freeze", "code")
     edge(
         "code",
-        partial(_after_code, max_sessions=b.coder_max_sessions),
-        ["tamper_gate", "opt_baseline", "dispute_gate", "code", "coder_gate"],
+        _via_overseer(partial(_after_code, max_sessions=b.coder_max_sessions), "code", ov),
+        ["tamper_gate", "opt_baseline", "dispute_gate", "code", "coder_gate", "oversee_code"],
     )
     edge("revise_test", _after_revise, ["code", "coder_gate"])
     edge("opt_baseline", _after_opt_baseline, ["digest", "optimize"])
     edge("optimize", _after_optimize, ["tamper_gate", "digest", "optimize"])
-    edge("digest", lambda s: "result_gate", ["result_gate"])
+    edge(
+        "digest",
+        _via_overseer(lambda s: "result_gate", "digest", ov),
+        ["result_gate", "oversee_result"],
+    )
     targets = {
         "roadmap": ["short_plan", "long_plan", END],
         "escalation": ["scout", "long_plan", END],

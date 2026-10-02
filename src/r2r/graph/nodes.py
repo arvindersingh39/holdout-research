@@ -19,6 +19,7 @@ from r2r.agents.math_designer import (
     write_design,
 )
 from r2r.agents.optimizer import notes, run_optimizer
+from r2r.agents.overseer import collect_evidence, run_overseer
 from r2r.agents.retriever import run_retriever
 from r2r.agents.scout import run_scout
 from r2r.agents.short_planner import run_short_planner
@@ -29,6 +30,7 @@ from r2r.contracts import (
     OptimizationOutcome,
     Roadmap,
 )
+from r2r.contracts.oversight import OversightPoint
 from r2r.digest.builder import build_digest, write_deviations
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest, gate_request
@@ -94,7 +96,7 @@ def long_plan(state: PipelineState, deps: RunDeps) -> Update:
         state.get("digest"),
         state.get("human_note"),
         _issues(state, "roadmap"),
-        deps.ctx(),
+        deps.ctx(briefing=_briefing(state, "long_planner")),
     )
     gates = deps.settings.budgets.gates
     approved = state.get("approved_roadmap")
@@ -118,7 +120,14 @@ def short_plan(state: PipelineState, deps: RunDeps) -> Update:
     pack = build_pack(query, budget, deps.settings.budgets.context_pack.k, deps.index, deps.blobs)
     issues = _issues(state, "spec")
     previous = state.get("spec") if issues else None
-    spec = run_short_planner(state["roadmap"], m, pack, previous, issues, deps.ctx(m.id))
+    spec = run_short_planner(
+        state["roadmap"],
+        m,
+        pack,
+        previous,
+        issues,
+        deps.ctx(m.id, _briefing(state, "short_planner")),
+    )
     return {"spec": spec}
 
 
@@ -176,7 +185,7 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
             pack,
             _existing_files(deps),
             state.get("design_feedback"),
-            deps.ctx(m.id),
+            deps.ctx(m.id, _briefing(state, "math_designer")),
             baselines=state.get("baselines", []),
             baseline_note=state.get("baseline_note") or "",
         )
@@ -253,7 +262,7 @@ def code(state: PipelineState, deps: RunDeps) -> Update:
         state["math_spec"],
         state.get("test_result"),
         tools,
-        deps.ctx(m.id),
+        deps.ctx(m.id, _briefing(state, "coder")),
         model=model,
     )
     attempts = state.get("tamper_attempts", 0) + len(tools.tamper_attempts)
@@ -341,7 +350,7 @@ def optimize(state: PipelineState, deps: RunDeps) -> Update:
             target,
             ms,
             notes(patches, outcomes),
-            deps.ctx(m.id),
+            deps.ctx(m.id, _briefing(state, "optimizer")),
         )
     except BudgetExceeded as e:
         return {"opt_stop_reason": f"budget exhausted ({e})"}  # D40
@@ -438,15 +447,72 @@ def finish(state: PipelineState, deps: RunDeps) -> Update:
 # --- gates -----------------------------------------------------------------------------
 
 
-def _ask(req: GateRequest) -> HumanDecision:
+def _ask(state: PipelineState, deps: RunDeps, req: GateRequest) -> HumanDecision:
+    md = _render_oversight(state, deps.settings.budgets.overseer.flags_shown)
+    if md:
+        req = req.model_copy(update={"markdown": f"{req.markdown}\n\n{md}"})
     return HumanDecision.model_validate(interrupt(req.model_dump()))
+
+
+def _render_oversight(state: PipelineState, flags_shown: int) -> str:
+    """Phase 7c: what the overseer currently tells each agent, and its newest flags."""
+    briefings, flags = state.get("briefings") or {}, state.get("flags") or []
+    if not briefings and not flags:
+        return ""
+    lines = ["**Overseer** (advice only; it cannot route or approve)"]
+    for f in reversed(flags[-flags_shown:]):
+        lines.append(f"- ⚑ {f.severity}: {f.text} [{', '.join(f.evidence)}]")
+    for role, text in briefings.items():
+        lines.append(f"- briefing for {role}: {text}")
+    return "\n".join(lines)
+
+
+def _briefing(state: PipelineState, role: str) -> str | None:
+    return (state.get("briefings") or {}).get(role)
+
+
+PLANNERS = ("long_planner", "short_planner")
+
+
+def oversee(state: PipelineState, deps: RunDeps, point: OversightPoint) -> Update:
+    """A hook point (Phase 7c). Python decided to come here and decides where to go next; the
+    overseer only updates briefings and flags."""
+    lim = deps.settings.budgets.overseer
+    m = next_milestone(state["roadmap"]) if point != "plan" else None
+    files: dict[str, str] = {}
+    ms = state.get("math_spec")
+    if point in ("design", "code") and ms is not None:
+        root = deps.workspace().root
+        files = {p: (root / p).read_text() for p in ms.test_files if (root / p).is_file()}
+    evidence = collect_evidence(state, point, files, lim.evidence_chars)
+    mid = m.id if m is not None else None
+    report = run_overseer(
+        point,
+        state["roadmap"].goal,
+        mid,
+        evidence,
+        dict(state.get("briefings") or {}),
+        deps.ctx(mid),
+    )
+    briefings = dict(state.get("briefings") or {})
+    carry = dict(state.get("carry_briefings") or {})
+    for b in report.briefings:
+        briefings[b.role] = b.text
+        if point == "result" and b.role in PLANNERS:
+            carry[b.role] = b.text
+    return {
+        "briefings": briefings,
+        "carry_briefings": carry,
+        "flags": [*(state.get("flags") or []), *report.flags],
+        "oversee_calls": state.get("oversee_calls", 0) + 1,
+    }
 
 
 def roadmap_gate(state: PipelineState, deps: RunDeps) -> Update:
     rm = state["roadmap"]
     first = state.get("approved_roadmap") is None
     title = "Approve the first roadmap" if first else f"Approve roadmap changes (v{rm.version})"
-    d = _ask(gate_request("roadmap", title, rm))
+    d = _ask(state, deps, gate_request("roadmap", title, rm))
     update: Update = {"human_decision": d}
     if d.action == "approve":
         update["approved_roadmap"] = rm
@@ -471,7 +537,7 @@ def escalation_gate(state: PipelineState, deps: RunDeps) -> Update:
         contract_type="MilestoneSpec",
         contract_json=spec.model_dump_json(),
     )
-    d = _ask(req)
+    d = _ask(state, deps, req)
     update: Update = {"human_decision": d}
     if d.action == "edit":
         if not isinstance(d.edited, MilestoneSpec):
@@ -491,7 +557,11 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
     if attempts:
         md += "\n\n" + attempts
     d = _ask(
-        GateRequest(gate="result", title=f"Review the result of {digest.milestone_id}", markdown=md)
+        state,
+        deps,
+        GateRequest(
+            gate="result", title=f"Review the result of {digest.milestone_id}", markdown=md
+        ),
     )
     update: Update = {"human_decision": d}
     if d.action == "stop":
@@ -518,6 +588,10 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
         "baselines": [],
         "baseline_note": None,
         "perf_unmet": [],
+        "briefings": dict(state.get("carry_briefings") or {}),
+        "carry_briefings": {},
+        "flags": [],
+        "oversee_calls": 0,
         "dispute": None,
         "dispute_file": None,
         "coder_message": None,
@@ -544,9 +618,11 @@ def tests_gate(state: PipelineState, deps: RunDeps) -> Update:
         + files
     )
     d = _ask(
+        state,
+        deps,
         GateRequest(
             gate="tests", title=f"Review {ms.milestone_id}'s tests before coding", markdown=md
-        )
+        ),
     )
     if d.action == "stop":
         return {"human_decision": d, "status": "stopped"}
@@ -565,7 +641,9 @@ def design_gate(state: PipelineState, deps: RunDeps) -> Update:
     if ms is not None:
         md += "\n\n" + render(ms)
     d = _ask(
-        GateRequest(gate="design", title="Tests are not red for the right reason", markdown=md)
+        state,
+        deps,
+        GateRequest(gate="design", title="Tests are not red for the right reason", markdown=md),
     )
     update: Update = {"human_decision": d}
     if d.action == "stop":
@@ -580,7 +658,11 @@ def coder_gate(state: PipelineState, deps: RunDeps) -> Update:
     md = f"{state.get('coder_sessions', 0)} coder sessions used.\n\n" + render(r)
     if state.get("coder_message"):
         md += f"\n\n**The coder's last message**\n\n{state['coder_message']}"
-    d = _ask(GateRequest(gate="coder", title=f"{r.milestone_id}: tests still failing", markdown=md))
+    d = _ask(
+        state,
+        deps,
+        GateRequest(gate="coder", title=f"{r.milestone_id}: tests still failing", markdown=md),
+    )
     update: Update = {"human_decision": d}
     if d.action == "stop":
         update["status"] = "stopped"
@@ -600,7 +682,7 @@ def tamper_gate(state: PipelineState, deps: RunDeps) -> Update:
         f"Blocked write attempts so far: {state.get('tamper_attempts', 0)}.\n\n"
         "Approve restores the frozen files from git and lets the coder continue."
     )
-    d = _ask(GateRequest(gate="tamper", title="Tamper detected", markdown=md))
+    d = _ask(state, deps, GateRequest(gate="tamper", title="Tamper detected", markdown=md))
     update: Update = {"human_decision": d}
     if d.action == "stop":
         return update | {"status": "stopped"}
@@ -628,7 +710,9 @@ def budget_gate(state: PipelineState, deps: RunDeps) -> Update:
         "\n\nTo continue: quit, raise the caps in `config/budgets.yaml`, `r2r resume`, then "
         "approve to retry the blocked step."
     )
-    d = _ask(GateRequest(gate="budget", title=f"Budget exceeded at {blocked}", markdown=md))
+    d = _ask(
+        state, deps, GateRequest(gate="budget", title=f"Budget exceeded at {blocked}", markdown=md)
+    )
     update: Update = {"human_decision": d, "budget_blocked": None, "budget_message": None}
     if d.action == "stop":
         return update | {"status": "stopped"}
@@ -672,7 +756,9 @@ def dispute_gate(state: PipelineState, deps: RunDeps) -> Update:
         "\n\nApprove lets the math designer revise only this test file; the revision must "
         "pass on its reference solution and is re-frozen and committed as owner-approved."
     )
-    d = _ask(GateRequest(gate="dispute", title="Test disputed by the coder", markdown=md))
+    d = _ask(
+        state, deps, GateRequest(gate="dispute", title="Test disputed by the coder", markdown=md)
+    )
     update: Update = {"human_decision": d}
     if d.action == "stop":
         return update | {"status": "stopped"}
@@ -701,7 +787,7 @@ def revise_test(state: PipelineState, deps: RunDeps) -> Update:
             build_pack("", 1, 1, deps.index, deps.blobs),
             _existing_files(deps),
             feedback,
-            deps.ctx(m.id),
+            deps.ctx(m.id, _briefing(state, "math_designer")),
             baselines=state.get("baselines", []),
         )
     except ContractViolation:

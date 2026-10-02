@@ -12,6 +12,7 @@ from r2r.contracts import (
     MilestoneSpec,
     OptimizationOutcome,
     OptimizationPatch,
+    OversightFlag,
     ProfileReport,
     Proposal,
     ResearchBrief,
@@ -57,6 +58,12 @@ class PipelineState(TypedDict, total=False):
     opt_stop_reason: str | None
     digest: ResultDigest | None
     human_decision: HumanDecision | None
+    briefings: dict[str, str]  # role -> the overseer's active briefing (Phase 7c)
+    carry_briefings: dict[
+        str, str
+    ]  # planner briefings from a result review, for the next milestone
+    flags: list[OversightFlag]  # overseer flags for this milestone, shown at gates
+    oversee_calls: int  # overseer calls for the current milestone
     human_note: str | None  # a redirect note waiting for the long-term planner
     budget_blocked: str | None  # node that hit BudgetExceeded (D46)
     budget_message: str | None

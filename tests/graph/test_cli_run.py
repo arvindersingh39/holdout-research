@@ -1,5 +1,6 @@
 """`r2r run`, `show`, `status` and `resume` through the real terminal gate, with typed input."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,13 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakeLLM:
     f.script("retriever", BRIEF)
     f.script("long_planner", ROADMAP)
     script_milestone(f, 1)
+    flag = {"severity": "warn", "text": "AC1 looks loose", "evidence": ["E1"]}
+    f.script(
+        "overseer",
+        json.dumps({"point": "plan", "flags": [flag]}),
+        json.dumps({"point": "spec"}),
+        json.dumps({"point": "result"}),
+    )
     monkeypatch.setattr(cli, "make_client", lambda settings: f)
     monkeypatch.setattr(cli, "make_sandbox_factory", lambda: LocalProcessBackend)
     return f
@@ -39,6 +47,7 @@ def test_run_quit_resume_show_status(tmp_path: Path, fake: FakeLLM) -> None:
 
     assert "Roadmap v1" in _invoke(["show", "c", "roadmap"], tmp_path)
     assert "Research brief" in _invoke(["show", "c", "brief"], tmp_path)
+    assert "AC1 looks loose" in _invoke(["show", "c", "oversight"], tmp_path)  # Phase 7c
 
     # approve the roadmap and the tests, then stop at the first result gate
     out = _invoke(["resume", "c"], tmp_path, keys="a\na\ns\nenough for today\n")

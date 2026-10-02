@@ -99,7 +99,16 @@ def ingest(
 
 # --- the pipeline: run, resume, status, show ----------------------------------------------
 
-SHOWABLE = ("brief", "roadmap", "spec", "verdict", "math_spec", "test_result", "digest")
+SHOWABLE = (
+    "brief",
+    "roadmap",
+    "spec",
+    "verdict",
+    "math_spec",
+    "test_result",
+    "digest",
+    "oversight",
+)
 RunsBase = Annotated[Path | None, typer.Option(help="Where runs/ lives (default: repo)")]
 ChannelOpt = Annotated[
     str | None, typer.Option(help="Gate channel: terminal or whatsapp (default: budgets.yaml)")
@@ -249,7 +258,14 @@ def show(
         raise typer.Exit(2)
     deps = _deps(run_id, runs_base)
     with open_graph(deps) as graph:
-        value = graph.get_state(config(run_id)).values.get(contract)
+        values = graph.get_state(config(run_id)).values
+    if contract == "oversight":  # Phase 7c: active briefings and this milestone's flags
+        from r2r.graph.nodes import _render_oversight
+
+        md = _render_oversight(values, flags_shown=1000)
+        console.print(Markdown(md) if md else "No overseer briefings or flags yet.")
+        return
+    value = values.get(contract)
     if value is None:
         console.print(f"No {contract} yet in run {run_id}.")
         raise typer.Exit(1)
