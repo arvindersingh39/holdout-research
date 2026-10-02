@@ -91,7 +91,7 @@ def test_impossible_tests_are_caught_before_freezing(ws: Workspace, bug: str) ->
     assert rg.unsatisfiable == [
         "tests.frozen.test_m1::test_AC1__" + bug.split("def test_AC1__")[1].split("(")[0]
     ]
-    assert "can never pass" in rg.describe()
+    assert "fail on your own reference solution" in rg.describe()
 
 
 def test_missing_reference_is_not_ok(ws: Workspace) -> None:
@@ -170,3 +170,17 @@ def test_correctness_failure_on_reference_never_exempt() -> None:
         ["AC1"], stubs, [], reference_cases=[_case("test_AC1__x", "failed", "assert 1 == 2")]
     )
     assert not rg.ok and rg.perf_unmet == []
+
+
+# --- reference-failure feedback (D61): show why, and don't presume the test is the culprit ----
+
+
+def test_reference_failure_feedback_shows_message_and_both_suspects() -> None:
+    stubs = [_case("test_AC3__incremental_energy", "failed", "NotImplementedError")]
+    why = "AssertionError: assert 8192.0 < 1e-09\n where 8192.0 = abs((-8192) - 0)\nlong traceback"
+    ref = [_case("test_AC3__incremental_energy", "failed", why)]
+    text = assess(["AC3"], stubs, [], reference_cases=ref).describe()
+    assert "test_AC3__incremental_energy: AssertionError: assert 8192.0 < 1e-09" in text
+    assert "long traceback" not in text  # first line only
+    assert "either the test or your reference" in text.lower()
+    assert "never loosen" in text.lower()

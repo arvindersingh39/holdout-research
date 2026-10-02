@@ -112,8 +112,8 @@ def test_unsatisfiable_design_redesigned_then_gate(tmp_path: Path, fake: FakeLLM
     ch = FakeChannel(decide("approve"), decide("stop"))
     _run(tmp_path, fake, ch)
     assert ch.gates == ["roadmap", "design"]
-    assert "can never pass" in _designer_payload(fake, 1)
-    assert "can never pass" in ch.requests[-1].markdown
+    assert "fail on your own reference solution" in _designer_payload(fake, 1)
+    assert "fail on your own reference solution" in ch.requests[-1].markdown
 
 
 def test_dispute_approved_revision_then_code_passes(tmp_path: Path, fake: FakeLLM) -> None:

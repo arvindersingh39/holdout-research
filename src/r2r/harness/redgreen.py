@@ -26,6 +26,7 @@ class RedGreen:
     unsatisfiable: list[str] = field(default_factory=list)  # fail even on the reference (D54)
     no_reference: bool = False
     perf_unmet: list[str] = field(default_factory=list)  # perf targets the reference misses (D60)
+    reference_excerpts: dict[str, str] = field(default_factory=dict)  # why each failed (D61)
 
     def describe(self) -> str:
         """Feedback for the math designer (or the human at the design gate)."""
@@ -43,9 +44,13 @@ class RedGreen:
         if self.no_reference:
             lines.append("No reference solution was provided (files with purpose 'reference').")
         if self.unsatisfiable:
+            lines.append("Tests that fail on your own reference solution:")
+            for test_id in self.unsatisfiable:
+                lines.append(f"- {test_id}: {self.reference_excerpts.get(test_id, '')}")
             lines.append(
-                "Tests that fail on your own reference solution, so they can never pass: "
-                + ", ".join(self.unsatisfiable)
+                "Either the test or your reference is wrong: check the reference first (e.g. "
+                "integer dtype overflow, edge cases), then the test. Never loosen a criterion's "
+                "numbers to make a test pass."
             )
         return "\n".join(lines) or "All criteria are red for the right reason."
 
@@ -68,14 +73,17 @@ def assess(
             if c.criterion_id:
                 red.add(c.criterion_id)
         else:
-            broken[c.test_id] = c.text.strip().splitlines()[0][:EXCERPT_CHARS] if c.text else ""
+            broken[c.test_id] = _first_line(c.text)
     vacuous = [cid for cid in criteria if cid not in red]
     failing_checks = [c.file for c in checks if not c.passed]
     no_reference = reference_cases is None
     unsatisfiable: list[str] = []
     perf_unmet: list[str] = []
+    reference_excerpts: dict[str, str] = {}
     if isinstance(reference_cases, list | tuple):
-        unsatisfiable = sorted(c.test_id for c in reference_cases if c.misses_reference)
+        missed = [c for c in reference_cases if c.misses_reference]
+        unsatisfiable = sorted(c.test_id for c in missed)
+        reference_excerpts = {c.test_id: _first_line(c.text) for c in missed}
         perf_unmet = sorted(
             c.test_id for c in reference_cases if c.outcome == "failed" and c.is_perf
         )
@@ -87,9 +95,14 @@ def assess(
         and not unsatisfiable,
         unsatisfiable=unsatisfiable,
         perf_unmet=perf_unmet,
+        reference_excerpts=reference_excerpts,
         no_reference=no_reference,
         vacuous=vacuous,
         broken=sorted(broken),
         failing_checks=failing_checks,
         broken_excerpts=broken,
     )
+
+
+def _first_line(text: str) -> str:
+    return text.strip().splitlines()[0][:EXCERPT_CHARS] if text.strip() else ""

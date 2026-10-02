@@ -29,8 +29,9 @@ your tests afterwards. Weak tests let wrong code through; wrong tests block corr
 ## Reference solution (required)
 - Also write a minimal, correct, unoptimised implementation of every stub as files with
   `purpose: "reference"` and the **same paths** as the stubs (e.g. `src/pkg/core.py`). The harness
-  runs your tests against it before freezing: any test that fails on your own reference can never
-  pass and is rejected. The coder never sees the reference.
+  runs your tests against it before freezing, and a design whose tests fail on it is rejected; the
+  feedback shows each failure. Either the test or the reference may be wrong, so check the
+  reference first (e.g. integer dtypes that overflow at large sizes). The coder never sees it.
 
 ## Performance criteria
 - A speed or resource target (e.g. "1000 sweeps in under 0.5 s") gets a test named
