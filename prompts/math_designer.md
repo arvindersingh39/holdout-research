@@ -22,7 +22,8 @@ your tests afterwards. Weak tests let wrong code through; wrong tests block corr
   NotImplementedError**, not because of an import error or a mistake in the test.
 - **Checks** `checks/check_<milestone>_<topic>.py`: plain Python scripts that verify the key
   identities of the derivation with SymPy and `assert` them (exit non-zero on failure).
-- **Bench** `bench/bench_main.py`: defines `main()` that runs the milestone's workload once at the
+- **Bench** `bench/bench_main.py`: `spec.bench.entrypoint` is that **file path** (e.g.
+  `bench/bench_m3_estimators.py`), never a module path like `bench.x:main`. It defines `main()` that runs the milestone's workload once at the
   benchmark problem size (the harness times repeated calls of `main()`).
 
 ## Rules

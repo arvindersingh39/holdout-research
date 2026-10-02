@@ -150,9 +150,16 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
     prev = state.get("math_spec")
     previous = prev if prev is not None and prev.milestone_id == m.id else None
     failed = state.get("design_attempts", 0)
-    out = run_math_designer(
-        spec, m, pack, _existing_files(deps), state.get("design_feedback"), deps.ctx(m.id)
-    )
+    try:
+        out = run_math_designer(
+            spec, m, pack, _existing_files(deps), state.get("design_feedback"), deps.ctx(m.id)
+        )
+    except ContractViolation as e:  # unusable output: a failed design attempt, not a crash
+        return {
+            "redgreen_ok": False,
+            "design_attempts": failed + 1,
+            "design_feedback": f"The previous answer was an invalid design: {str(e)[:600]}",
+        }
     try:
         write_design(ws, out, previous)
     except DesignError as e:

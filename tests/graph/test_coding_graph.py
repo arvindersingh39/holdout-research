@@ -177,3 +177,16 @@ def test_second_milestone_keeps_first_milestones_tests(tmp_path: Path, fake: Fak
     assert res.state["test_result"].n_passed == 4  # both milestones' tests run every time
     existing = [r for r in fake.calls if r.role == "math_designer"][1]
     assert "tests/frozen/test_m1_square.py" in str(existing.messages[1]["content"])
+
+
+def test_unusable_design_is_a_failed_attempt_not_a_crash(tmp_path: Path, fake: FakeLLM) -> None:
+    """pilot-1 M3: #4 named the bench as a module path twice → ContractViolation. That must count
+    as a failed design (feedback, one redesign, then the design gate), not crash the run."""
+    bad = '{"spec": {"formulation": "x"}, "files": []}'  # fails MathDesign validation
+    _start(fake)
+    fake.script("math_designer", bad, bad, bad, bad)  # 2 attempts x (answer + repair)
+    ch = FakeChannel(decide("approve"), decide("stop"))
+    _, res = _run(tmp_path, fake, ch)
+    assert ch.gates == ["roadmap", "design"]
+    assert "invalid design" in ch.requests[-1].markdown
+    assert res.status == "stopped"
