@@ -14,10 +14,7 @@ from r2r.retrieval.context_pack import ContextPack
 
 ROLE = "short_planner"
 SpecDraft = draft_model(MilestoneSpec, {"context_refs"})
-# The spec's cap includes the context refs code attaches, so keep them compact (pilot-1, M3).
-MAX_REFS = 5
-REF_SUMMARY_CHARS = 100
-META_TOKENS = 60  # created_by, run_id, milestone_id
+META_TOKENS = 60  # created_by, run_id, milestone_id (an estimate, not a limit)
 
 
 class ShortPlanInput(BaseModel):
@@ -38,9 +35,11 @@ def run_short_planner(
     issues: list[Issue],
     ctx: CallContext,
 ) -> MilestoneSpec:
+    # The spec's cap includes the refs code attaches, so keep them compact (pilot-1, M3; D55).
+    lim = ctx.settings.budgets.context_pack
     refs = [
-        r.model_copy(update={"summary": r.summary[:REF_SUMMARY_CHARS]}).model_dump()
-        for r in pack.refs[:MAX_REFS]
+        r.model_copy(update={"summary": r.summary[: lim.ref_summary_chars]}).model_dump()
+        for r in pack.refs[: lim.max_refs]
     ]
     budget = get_contract_caps()["MilestoneSpec"] - estimate_tokens(json.dumps(refs)) - META_TOKENS
     payload = ShortPlanInput(

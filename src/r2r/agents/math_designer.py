@@ -10,7 +10,7 @@ import json
 
 from pydantic import BaseModel
 
-from r2r.contracts import MathDesign, MathSpec, Milestone, MilestoneSpec
+from r2r.contracts import BaselineCard, FileSpec, MathDesign, MathSpec, Milestone, MilestoneSpec
 from r2r.harness.workspace import UnsafePath, Workspace, safe_path
 from r2r.llm.gateway import CallContext, call_structured
 from r2r.retrieval.context_pack import ContextPack
@@ -29,6 +29,8 @@ class DesignInput(BaseModel):
     context: str  # retrieved chunks, each inside <document> tags
     existing_files: list[str]  # files already in the workspace (earlier milestones)
     feedback: str | None = None  # why the previous design was rejected
+    baselines: list[BaselineCard] = []  # quote-verified published values (D52)
+    baseline_note: str = ""
 
 
 def run_math_designer(
@@ -38,6 +40,8 @@ def run_math_designer(
     existing_files: list[str],
     feedback: str | None,
     ctx: CallContext,
+    baselines: list[BaselineCard] | None = None,
+    baseline_note: str = "",
 ) -> MathDesign:
     payload = DesignInput(
         spec=spec,
@@ -45,8 +49,14 @@ def run_math_designer(
         context=pack.text,
         existing_files=existing_files,
         feedback=feedback,
+        baselines=baselines or [],
+        baseline_note=baseline_note,
     )
     return call_structured(ROLE, ROLE, payload, MathDesign, ctx)
+
+
+def reference_files(design: MathDesign) -> list[FileSpec]:
+    return [f for f in design.files if f.purpose == "reference"]
 
 
 def _frozen_files(ws: Workspace) -> set[str]:
@@ -68,6 +78,8 @@ def write_design(ws: Workspace, design: MathDesign, previous: MathSpec | None) -
                 (ws.root / rel).unlink(missing_ok=True)
     targets = []
     for f in design.files:
+        if f.purpose == "reference":
+            continue  # kept outside the workspace (D54)
         try:
             path = safe_path(ws.root, f.path, DESIGN_DIRS, allow_frozen=True)
         except UnsafePath as e:

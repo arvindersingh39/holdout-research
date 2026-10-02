@@ -55,6 +55,19 @@ class NoArgs(BaseModel):
     pass
 
 
+class DisputeArgs(BaseModel):
+    test_id: str
+    reason: str
+    evidence: str = ""
+
+
+@dataclass(frozen=True)
+class Dispute:
+    test_id: str
+    reason: str
+    evidence: str
+
+
 @dataclass
 class CoderTools:
     ws: Workspace
@@ -64,6 +77,7 @@ class CoderTools:
     timeout_s: float
     tamper_attempts: list[str] = field(default_factory=list)
     last_result: TestResult | None = None
+    disputes: list[Dispute] = field(default_factory=list)
 
     def tools(self) -> list[Tool]:
         return [
@@ -101,6 +115,14 @@ class CoderTools:
                 NoArgs,
                 self.run_tests,
                 max_output_chars=6000,
+            ),
+            Tool(
+                "dispute_test",
+                "Flag a frozen test you believe can never pass for correct code. Give the test id, "
+                "your reason and concrete evidence. Ends the session; a human decides.",
+                DisputeArgs,
+                self.dispute_test,
+                max_output_chars=300,
             ),
         ]
 
@@ -170,6 +192,11 @@ class CoderTools:
 
     # --- test --------------------------------------------------------------------------------
 
+    def dispute_test(self, args: DisputeArgs) -> str:
+        self.disputes.append(Dispute(args.test_id[:200], args.reason[:1000], args.evidence[:1500]))
+        log.warning("test disputed", extra={"test_id": args.test_id[:200]})
+        return "Dispute recorded. The session ends here and the human decides."
+
     def run_tests(self, _: NoArgs) -> str:
         try:
             result = run_tests(
@@ -208,7 +235,8 @@ def run_coder_session(
     model: str | None = None,
 ) -> CoderSession:
     def stop(_: ToolLoopState) -> bool:
-        return tools.last_result is not None and tools.last_result.passed
+        passed = tools.last_result is not None and tools.last_result.passed
+        return passed or bool(tools.disputes)
 
     payload = CoderInput(
         spec=spec, math_spec=math_spec, last_test_result=last, files=tools.list_files(ListArgs())

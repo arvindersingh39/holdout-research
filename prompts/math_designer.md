@@ -26,6 +26,25 @@ your tests afterwards. Weak tests let wrong code through; wrong tests block corr
   `bench/bench_m3_estimators.py`), never a module path like `bench.x:main`. It defines `main()` that runs the milestone's workload once at the
   benchmark problem size (the harness times repeated calls of `main()`).
 
+## Reference solution (required)
+- Also write a minimal, correct, unoptimised implementation of every stub as files with
+  `purpose: "reference"` and the **same paths** as the stubs (e.g. `src/pkg/core.py`). The harness
+  runs your tests against it before freezing: any test that fails on your own reference can never
+  pass and is rejected. The coder never sees the reference.
+
+## Baselines
+- `baselines` are published values whose quotes were checked against their sources. Where one
+  matches a criterion, use it as the expected value, cite `source_url` in the test's docstring, and
+  never use a tolerance tighter than the source's stated precision.
+- If there are none (`baseline_note` says why), derive expected values from first principles and
+  say so in the docstring. Never invent a "published" number.
+
+## Tests of noisy or numerical results
+- Derive tolerances from the estimator's standard error (e.g. 4 SE), never from wishful precision.
+- Never demand exact agreement where an estimate can have zero variance (e.g. no path in the
+  money): handle that case with an absolute tolerance the method can actually achieve.
+- Compare like-shaped arrays (`np.broadcast_to` before `assert_allclose`); fix seeds explicitly.
+
 ## Rules
 - Never rewrite files listed in `existing_files`: earlier milestones' tests are frozen and their
   code is in use. Add new modules and new test files instead.

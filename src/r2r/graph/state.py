@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal, TypedDict
 
 from r2r.contracts import (
+    BaselineCard,
     CoordinatorVerdict,
     HumanDecision,
     MathSpec,
@@ -40,6 +41,11 @@ class PipelineState(TypedDict, total=False):
     coder_sessions: int
     tamper: str | None  # FrozenTamper message waiting at the tamper gate
     tamper_attempts: int  # blocked writes to frozen files, over the whole run
+    baselines: list[BaselineCard]  # quote-verified published values for this milestone (D52)
+    baseline_note: str | None
+    dispute: str | None  # the coder's dispute of a frozen test, rendered (D56)
+    dispute_file: str | None
+    coder_message: str | None  # the coder's final words in its last session
     opt_outcomes: list[OptimizationOutcome]
     opt_patches: list[OptimizationPatch | None]  # aligned with opt_outcomes; None = no valid patch
     opt_baseline_s: float | None

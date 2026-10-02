@@ -40,12 +40,23 @@ GATES: dict[GateKind, Callable] = {
     "coder": nodes.coder_gate,
     "tamper": nodes.tamper_gate,
     "budget": nodes.budget_gate,
+    "dispute": nodes.dispute_gate,
     "result": nodes.result_gate,
 }
 
 # Nodes that call an LLM: a BudgetExceeded there routes to the budget gate (D46). The optimizer
 # loop handles its own budget stop (D40).
-GUARDED = ("retrieve", "long_plan", "short_plan", "coordinate", "design", "code", "digest")
+GUARDED = (
+    "retrieve",
+    "long_plan",
+    "short_plan",
+    "coordinate",
+    "scout",
+    "design",
+    "code",
+    "revise_test",
+    "digest",
+)
 
 
 def _guard(name: str, fn: Callable, deps: RunDeps) -> Callable:
@@ -97,7 +108,13 @@ def _after_code(state: PipelineState, max_sessions: int) -> str:
         bool(result and result.passed),
         state.get("coder_sessions", 0),
         max_sessions,
+        disputed=bool(state.get("dispute")),
     )
+
+
+def _after_revise(state: PipelineState) -> str:
+    ok = state.get("dispute_file") is None and not state.get("coder_message")
+    return "code" if ok else "coder_gate"
 
 
 def _after_opt_baseline(state: PipelineState) -> str:
@@ -119,7 +136,9 @@ def build_graph(deps: RunDeps) -> StateGraph:
         "long_plan": nodes.long_plan,
         "short_plan": nodes.short_plan,
         "coordinate": nodes.coordinate,
+        "scout": nodes.scout,
         "design": nodes.design,
+        "revise_test": nodes.revise_test,
         "freeze": nodes.freeze_tests,
         "code": nodes.code,
         "opt_baseline": nodes.opt_baseline,
@@ -147,8 +166,9 @@ def build_graph(deps: RunDeps) -> StateGraph:
     edge(
         "coordinate",
         partial(_after_coordinate, max_rounds=b.coordinator_max_revise_rounds),
-        ["design", "short_plan", "long_plan", "escalation_gate"],
+        ["scout", "short_plan", "long_plan", "escalation_gate"],
     )
+    edge("scout", lambda s: "design", ["design"])
     edge(
         "design",
         partial(_after_design, review_tests=b.gates.review_tests),
@@ -158,14 +178,16 @@ def build_graph(deps: RunDeps) -> StateGraph:
     edge(
         "code",
         partial(_after_code, max_sessions=b.coder_max_sessions),
-        ["tamper_gate", "opt_baseline", "code", "coder_gate"],
+        ["tamper_gate", "opt_baseline", "dispute_gate", "code", "coder_gate"],
     )
+    edge("revise_test", _after_revise, ["code", "coder_gate"])
     edge("opt_baseline", _after_opt_baseline, ["digest", "optimize"])
     edge("optimize", _after_optimize, ["tamper_gate", "digest", "optimize"])
     edge("digest", lambda s: "result_gate", ["result_gate"])
     targets = {
         "roadmap": ["short_plan", "long_plan", END],
-        "escalation": ["design", "long_plan", END],
+        "escalation": ["scout", "long_plan", END],
+        "dispute": ["revise_test", "long_plan", END],
         "tests": ["freeze", "design", END],
         "design": ["freeze", "long_plan", END],
         "coder": ["digest", "long_plan", END],

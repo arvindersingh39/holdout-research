@@ -15,6 +15,7 @@ GateKind = Literal[
     "coder",
     "tamper",
     "budget",
+    "dispute",
     "result",
     "publication",
 ]
@@ -67,7 +68,7 @@ def is_material_change(old: Roadmap | None, new: Roadmap) -> bool:
 def route_after_coordinator(verdict: CoordinatorVerdict, rounds: int, max_rounds: int) -> str:
     """`rounds` counts revise verdicts so far for this milestone, including this one."""
     if verdict.verdict == "pass":
-        return "design"
+        return "scout"
     if rounds > max_rounds:
         return "escalation_gate"
     if any(i.target == "roadmap" for i in verdict.issues):
@@ -82,7 +83,8 @@ def route_after_gate(gate: GateKind, decision: HumanDecision) -> str:
         return "design" if gate == "tests" else "long_plan"
     return {
         "roadmap": "short_plan",
-        "escalation": "design",
+        "escalation": "scout",
+        "dispute": "revise_test",
         "tests": "freeze",
         "design": "freeze",
         "coder": "digest",
@@ -107,11 +109,15 @@ def route_after_design(redgreen_ok: bool, failed_attempts: int, review: bool) ->
     return "design" if failed_attempts < 2 else "design_gate"
 
 
-def route_after_code(tampered: bool, passed: bool, sessions: int, max_sessions: int) -> str:
+def route_after_code(
+    tampered: bool, passed: bool, sessions: int, max_sessions: int, disputed: bool = False
+) -> str:
     if tampered:
         return "tamper_gate"
     if passed:
         return "opt_baseline"
+    if disputed:
+        return "dispute_gate"
     return "code" if sessions < max_sessions else "coder_gate"
 
 

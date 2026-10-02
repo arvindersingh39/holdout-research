@@ -4,7 +4,7 @@ import json
 
 from samples import blob_ref, milestone, milestone_spec, roadmap
 
-from r2r.agents.short_planner import MAX_REFS, REF_SUMMARY_CHARS, run_short_planner
+from r2r.agents.short_planner import run_short_planner
 from r2r.contracts import BlobRef, get_contract_caps
 from r2r.llm.fake import FakeLLM
 from r2r.llm.gateway import CallContext
@@ -24,8 +24,9 @@ def _pack(n: int) -> ContextPack:
 def test_refs_are_capped_and_trimmed(ctx: CallContext, fake: FakeLLM) -> None:
     fake.script("short_planner", milestone_spec().model_dump_json(exclude=META))
     spec = run_short_planner(roadmap(), milestone(1), _pack(8), None, [], ctx)
-    assert len(spec.context_refs) == MAX_REFS
-    assert all(len(r.summary) <= REF_SUMMARY_CHARS for r in spec.context_refs)
+    lim = ctx.settings.budgets.context_pack  # limits live in budgets.yaml (D55)
+    assert len(spec.context_refs) == lim.max_refs
+    assert all(len(r.summary) <= lim.ref_summary_chars for r in spec.context_refs)
 
 
 def test_planner_is_told_its_budget(ctx: CallContext, fake: FakeLLM) -> None:
