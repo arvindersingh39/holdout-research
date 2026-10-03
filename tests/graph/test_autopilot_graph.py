@@ -164,3 +164,39 @@ def test_serious_test_flag_triggers_an_automatic_redirect(tmp_path: Path, fake: 
         ("tests", "redirect"),
         ("tests", "approve"),
     ]
+
+
+def test_cli_autopilot_flag_and_show_decisions(tmp_path: Path, fake: FakeLLM, monkeypatch) -> None:
+    from typer.testing import CliRunner
+
+    import r2r.cli as cli
+    from r2r.harness.sandbox import LocalProcessBackend
+
+    fake.script("retriever", __import__("graph_helpers").BRIEF)
+    _start(fake, roadmaps=3)
+    fake.script("coder", *_session(1, WRONG), *_session(1, IMPL))
+    fake.script("short_planner", SPEC)
+    fake.script("coordinator", PASS)
+    fake.script("math_designer", _design(2))
+    fake.script("coder", *_session(2, IMPL))
+    monkeypatch.setattr(cli, "make_client", lambda settings: fake)
+    monkeypatch.setattr(cli, "make_sandbox_factory", lambda: LocalProcessBackend)
+    real = cli.project_settings
+
+    def no_publish():  # publishing has its own tests; this one is about autopilot
+        st = real()
+        b = st.budgets
+        pub = b.publish.model_copy(update={"modes": []})
+        return st.model_copy(update={"budgets": b.model_copy(update={"publish": pub})})
+
+    monkeypatch.setattr(cli, "project_settings", no_publish)
+    base = ["--runs-base", str(tmp_path)]
+    out = CliRunner().invoke(
+        cli.app,
+        ["run", "--proposal", str(_proposal(tmp_path)), "--run-id", "ap", "--autopilot", *base],
+        input="a\nq\n",
+    )
+    assert out.exit_code == 0, out.output
+    shown = CliRunner().invoke(cli.app, ["show", "ap", "decisions", *base])
+    assert shown.exit_code == 0, shown.output
+    assert "tests" in shown.output and "approve" in shown.output and "autopilot:" in shown.output

@@ -62,6 +62,18 @@ your tests afterwards. Weak tests let wrong code through; wrong tests block corr
 - Use each value at the precision it is recorded with (a value printed to 3 decimals is checked
   to ±0.0005), unless the file states otherwise.
 
+## Verify scripts (when `data_files` holds the owner's recorded values)
+- For every recorded value this milestone reproduces, write a verify script
+  `tests/frozen/verify/verify_<topic>.py` (purpose "test"). Its `main()` runs the implementation and
+  writes `results/verify/verify_<topic>.json` (same name as the script) containing
+  `{"entries": [{"ref": "<path into the reference file>", "generated": <value>}]}`, e.g.
+  `{"ref": "ensemble.graphs[4].kappa_realised", "generated": 9.13}`. End the file with
+  `if __name__ == "__main__": main()`. It runs from the workspace root with `src/` importable.
+- `ref` must point at a value that exists in the reference JSON. Report the raw value: never round,
+  compare or decide pass/fail; the harness checks it against the owner's file and tolerances.
+- Verify scripts are not tests: keep the frozen tests as the proposal's testing rule says. Keep each
+  script within the benchmark time limit (use the recorded configurations, not larger ones).
+
 ## Baselines
 - `baselines` are published values whose quotes were checked against their sources. Where one
   matches a criterion, use it as the expected value, cite `source_url` in the test's docstring, and

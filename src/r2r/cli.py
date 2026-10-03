@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -108,6 +109,7 @@ SHOWABLE = (
     "test_result",
     "digest",
     "oversight",
+    "decisions",
 )
 RunsBase = Annotated[Path | None, typer.Option(help="Where runs/ lives (default: repo)")]
 ChannelOpt = Annotated[
@@ -176,6 +178,23 @@ def make_channel(settings: Settings, override: str | None = None):
     return TerminalChannel(console=console)
 
 
+AutopilotOpt = Annotated[
+    bool, typer.Option("--autopilot", help="Decide routine gates automatically (D76)")
+]
+
+
+def _with_autopilot(deps, on: bool):
+    """--autopilot for this invocation: routine gates are decided by plain-Python rules."""
+    if on:
+        b = deps.settings.budgets
+        ap = b.autopilot.model_copy(update={"enabled": True})
+        deps.settings = deps.settings.model_copy(
+            update={"budgets": b.model_copy(update={"autopilot": ap})}
+        )
+        console.print("[bold]Autopilot on:[/] routine gates are decided by rules and logged.")
+    return deps
+
+
 def _drive(deps, start: bool, channel: str | None = None) -> None:
     from r2r.graph.driver import drive, open_graph
     from r2r.llm.gateway import BudgetExceeded, ContractViolation
@@ -199,19 +218,26 @@ def run(
     run_id: Annotated[str | None, typer.Option(help="Run id (default: folder name + time)")] = None,
     runs_base: RunsBase = None,
     channel: ChannelOpt = None,
+    autopilot: AutopilotOpt = False,
 ) -> None:
-    """Start a run: retrieve, plan, and stop at every human gate."""
+    """Start a run: retrieve, plan, and stop at every human gate (or routine ones on autopilot)."""
     if not (proposal / "proposal.md").is_file():
         console.print(f"[red]{proposal}/proposal.md not found[/]")
         raise typer.Exit(2)
     run_id = run_id or f"{proposal.resolve().name}-{datetime.now():%Y%m%d-%H%M%S}"
-    _drive(_deps(run_id, runs_base, proposal), start=True, channel=channel)
+    deps = _with_autopilot(_deps(run_id, runs_base, proposal), autopilot)
+    _drive(deps, start=True, channel=channel)
 
 
 @app.command()
-def resume(run_id: str, runs_base: RunsBase = None, channel: ChannelOpt = None) -> None:
+def resume(
+    run_id: str,
+    runs_base: RunsBase = None,
+    channel: ChannelOpt = None,
+    autopilot: AutopilotOpt = False,
+) -> None:
     """Continue a run from its last checkpoint (for example a gate you left pending)."""
-    _drive(_deps(run_id, runs_base), start=False, channel=channel)
+    _drive(_with_autopilot(_deps(run_id, runs_base), autopilot), start=False, channel=channel)
 
 
 @app.command()
@@ -257,6 +283,16 @@ def show(
         console.print(f"[red]Choose one of: {', '.join(SHOWABLE)}[/]")
         raise typer.Exit(2)
     deps = _deps(run_id, runs_base)
+    if contract == "decisions":  # Phase 7d: what autopilot decided, and why
+        log_file = deps.paths.root / "decisions.jsonl"
+        if not log_file.is_file():
+            console.print("No automatic decisions in this run.")
+            return
+        for line in log_file.read_text().splitlines():
+            e = json.loads(line)
+            ms = e.get("milestone") or "run"
+            console.print(f"{e['ts']}  {ms:<4} {e['gate']:<12} {e['action']:<9} {e['note']}")
+        return
     with open_graph(deps) as graph:
         values = graph.get_state(config(run_id)).values
     if contract == "oversight":  # Phase 7c: active briefings and this milestone's flags
