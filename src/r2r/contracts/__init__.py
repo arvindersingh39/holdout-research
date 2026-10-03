@@ -31,6 +31,7 @@ from r2r.contracts.results import (
     PublicationBundle,
     ResultDigest,
 )
+from r2r.contracts.verification import Mismatch, VerificationReport
 
 __all__ = [
     "BaselineCard",
@@ -53,6 +54,7 @@ __all__ = [
     "MathSpec",
     "Milestone",
     "MilestoneSpec",
+    "Mismatch",
     "OptimizationOutcome",
     "OptimizationPatch",
     "OversightFlag",
@@ -68,6 +70,7 @@ __all__ = [
     "Roadmap",
     "Role",
     "TestResult",
+    "VerificationReport",
     "ensure_within_cap",
     "get_contract_caps",
     "set_contract_caps",

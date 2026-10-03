@@ -61,3 +61,4 @@ contract_token_caps:
   ResultDigest: 800
   OversightReport: 2000
   PaperSection: 4000
+  VerificationReport: 2500
