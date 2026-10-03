@@ -142,6 +142,20 @@ class ReferenceDataLimits(_Strict):
     agent_chars: PositiveInt  # cap per file shown to the designer and overseer
 
 
+class AutopilotConfig(_Strict):
+    """Phase 7d (D76): plain-Python decisions at routine gates (off unless enabled)."""
+
+    enabled: bool
+    roadmap_first: Literal["human", "auto"]
+    publication: Literal["human", "auto"]
+    max_auto_redirects: Annotated[int, Field(ge=0)]  # per milestone, then a human gate
+    max_fix_rounds: Annotated[int, Field(ge=0)]  # verification mismatches sent back to the coder
+
+
+class VerifyConfig(_Strict):
+    enabled: bool
+
+
 class PublishLimits(_Strict):
     """Phase 8 (D67): paper and package output."""
 
@@ -194,6 +208,8 @@ class BudgetsConfig(_Strict):
     overseer: OverseerLimits
     publish: PublishLimits
     reference_data: ReferenceDataLimits
+    autopilot: AutopilotConfig
+    verify: VerifyConfig
     gates: GatesConfig
     contract_token_caps: dict[str, PositiveInt]
 

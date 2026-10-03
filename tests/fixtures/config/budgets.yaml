@@ -38,6 +38,13 @@ reference_data:                   # owner's recorded values for tests (D71)
   dir: data                       # folder next to proposal.md; json/csv/tsv/txt/md only
   max_file_kb: 256
   agent_chars: 24000              # per file, shown verbatim to the designer and overseer
+autopilot:                        # plain-Python decisions at routine gates (D76)
+  enabled: false                  # or per run: r2r run/resume --autopilot
+  roadmap_first: human            # human | auto
+  publication: human              # human | auto
+  max_auto_redirects: 2           # per milestone, then a human gate
+  max_fix_rounds: 2               # verification mismatches sent back to the coder
+verify: {enabled: true}           # run tests/frozen/verify scripts after coding (D75)
 gates:
   channel: cli                       # cli | whatsapp (D2); terminal for now (D49)
   approve_first_roadmap: true
