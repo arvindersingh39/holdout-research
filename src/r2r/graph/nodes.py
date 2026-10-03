@@ -52,8 +52,10 @@ from r2r.harness.refdata import snapshot as snapshot_data
 from r2r.harness.reference import ReferenceError, check_reference, store_reference
 from r2r.harness.stoprule import decide
 from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
+from r2r.ingest.documents import wrap_document
 from r2r.ingest.proposal import ingest_proposal
 from r2r.llm.gateway import BudgetExceeded, ContractViolation
+from r2r.llm.tokens import estimate_tokens
 from r2r.publish.collect import collect_from_states
 from r2r.publish.run import run_publish
 from r2r.retrieval.context_pack import build_pack
@@ -104,6 +106,7 @@ def long_plan(state: PipelineState, deps: RunDeps) -> Update:
         state.get("human_note"),
         _issues(state, "roadmap"),
         deps.ctx(briefing=_briefing(state, "long_planner")),
+        proposal=_proposal_text(state, deps),
     )
     gates = deps.settings.budgets.gates
     approved = state.get("approved_roadmap")
@@ -135,6 +138,7 @@ def short_plan(state: PipelineState, deps: RunDeps) -> Update:
         issues,
         deps.ctx(m.id, _briefing(state, "short_planner")),
         data_files=[f"{DATA_DIR}/{n}" for n in _reference_data(deps)],
+        proposal=_proposal_text(state, deps),
     )
     return {"spec": spec}
 
@@ -144,6 +148,18 @@ def coordinate(state: PipelineState, deps: RunDeps) -> Update:
     verdict = run_coordinator(state["spec"], state["roadmap"], m, deps.ctx(m.id))
     rounds = state.get("revise_rounds", 0) + (1 if verdict.verdict == "revise" else 0)
     return {"verdict": verdict, "revise_rounds": rounds}
+
+
+def _proposal_text(state: PipelineState, deps: RunDeps) -> str:
+    """The owner's proposal in full when it is short (excerpts alone made planners think a fully
+    specified model was missing); "" when it is long, leaving retrieval to supply excerpts."""
+    p = state.get("proposal")
+    if p is None:
+        return ""
+    text = deps.blobs.get_text(p.text_ref)
+    if estimate_tokens(text) > deps.settings.budgets.context_pack.full_proposal_tokens:
+        return ""
+    return wrap_document(text, source="proposal.md")
 
 
 def _reference_data(deps: RunDeps) -> list[str]:
@@ -206,6 +222,7 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
             data_files=describe_data(
                 deps.paths.root, deps.settings.budgets.reference_data.agent_chars
             ),
+            proposal=_proposal_text(state, deps),
         )
     except ContractViolation as e:  # unusable output: a failed design attempt, not a crash
         return {
@@ -850,6 +867,7 @@ def revise_test(state: PipelineState, deps: RunDeps) -> Update:
             data_files=describe_data(
                 deps.paths.root, deps.settings.budgets.reference_data.agent_chars
             ),
+            proposal=_proposal_text(state, deps),
         )
     except ContractViolation:
         return fail

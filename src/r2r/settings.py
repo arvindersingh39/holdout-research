@@ -112,6 +112,7 @@ class ContextPackLimits(_Strict):
     k: PositiveInt  # chunks retrieved per query
     max_refs: PositiveInt  # context refs kept in a MilestoneSpec
     ref_summary_chars: Annotated[int, Field(ge=20, le=300)]
+    full_proposal_tokens: PositiveInt  # a proposal this short goes to planners/designer in full
 
 
 class BaselineLimits(_Strict):

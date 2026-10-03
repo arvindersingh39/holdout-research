@@ -21,6 +21,7 @@ class LongPlanInput(BaseModel):
     latest_digest: ResultDigest | None = None
     human_note: str | None = None
     coordinator_issues: list[Issue] = []
+    proposal: str = ""  # the owner's full proposal when short, inside <document> tags
 
 
 def run_long_planner(
@@ -30,6 +31,7 @@ def run_long_planner(
     note: str | None,
     issues: list[Issue],
     ctx: CallContext,
+    proposal: str = "",
 ) -> Roadmap:
     payload = LongPlanInput(
         brief=brief,
@@ -37,6 +39,7 @@ def run_long_planner(
         latest_digest=digest,
         human_note=note or None,
         coordinator_issues=issues,
+        proposal=proposal,
     )
     out = call_structured(ROLE, ROLE, payload, Roadmap, ctx)
     version = roadmap.version + 1 if roadmap else 1

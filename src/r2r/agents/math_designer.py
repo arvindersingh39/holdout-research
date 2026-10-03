@@ -33,6 +33,7 @@ class DesignInput(BaseModel):
     baselines: list[BaselineCard] = []  # quote-verified published values (D52)
     baseline_note: str = ""
     data_files: dict[str, str] = {}  # owner's recorded values, path -> content (D71)
+    proposal: str = ""  # the owner's full proposal when short, inside <document> tags
 
 
 def run_math_designer(
@@ -45,6 +46,7 @@ def run_math_designer(
     baselines: list[BaselineCard] | None = None,
     baseline_note: str = "",
     data_files: dict[str, str] | None = None,
+    proposal: str = "",
 ) -> MathDesign:
     payload = DesignInput(
         spec=spec,
@@ -55,6 +57,7 @@ def run_math_designer(
         baselines=baselines or [],
         baseline_note=baseline_note,
         data_files=data_files or {},
+        proposal=proposal,
     )
     return call_structured(ROLE, ROLE, payload, MathDesign, ctx)
 

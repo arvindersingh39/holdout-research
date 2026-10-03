@@ -15,7 +15,7 @@ ingest:
   chunk_overlap_tokens: 100
   paper_card_input_tokens: 12000   # how much of each paper the retriever reads
 context_pack_tokens: {short_planner: 1500, math_designer: 2500, writer_section: 2000}
-context_pack: {k: 8, max_refs: 5, ref_summary_chars: 100}   # chunks retrieved; refs kept in a spec
+context_pack: {k: 8, max_refs: 5, ref_summary_chars: 100, full_proposal_tokens: 4000}   # chunks retrieved; refs kept in a spec
 baselines:                        # published reference values for tests, via Tavily (D52)
   enabled: true                   # false for sensitive projects: queries reveal the topic
   max_queries: 4                  # per milestone
