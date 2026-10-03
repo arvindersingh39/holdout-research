@@ -20,6 +20,7 @@ from r2r.contracts import (
     ResultDigest,
     Roadmap,
     TestResult,
+    VerificationReport,
 )
 
 
@@ -69,6 +70,9 @@ class PipelineState(TypedDict, total=False):
     publication_md: str | None  # what the publication gate shows
     publish_note: str | None  # the owner's revision request
     publish_revisions: int
+    verification: VerificationReport | None  # Phase 7d: what the verifier measured
+    fix_rounds: int  # verification mismatches sent back to the coder this milestone
+    verify_retry: bool
     human_note: str | None  # a redirect note waiting for the long-term planner
     budget_blocked: str | None  # node that hit BudgetExceeded (D46)
     budget_message: str | None

@@ -62,6 +62,7 @@ GUARDED = (
     "oversee_spec",
     "oversee_design",
     "oversee_design_gate",
+    "oversee_tests",
     "oversee_code",
     "oversee_result",
 )
@@ -72,6 +73,7 @@ HOOKS = {
     "scout": "oversee_spec",
     "design": "oversee_design",
     "design_gate": "oversee_design_gate",  # the owner decides after two failed designs
+    "tests_gate": "oversee_tests",  # autopilot only: someone must read the tests (D76)
     "code": "oversee_code",
     "result_gate": "oversee_result",
 }
@@ -100,13 +102,15 @@ def _after_budget_gate(state: PipelineState) -> str:
     return state.get("budget_retry") or "long_plan"
 
 
-def _via_overseer(route: Callable[[PipelineState], str], src: str, lim) -> Callable:
+def _via_overseer(
+    route: Callable[[PipelineState], str], src: str, lim, autopilot: bool = False
+) -> Callable:
     """Send `src`'s next step through its overseer hook when enabled and under the call cap.
     Only the hook's own edge returns to the original target: the overseer never routes."""
     hooked = {
         "long_plan": {"roadmap_gate"},
         "coordinate": {"scout"},
-        "design": {"design", "design_gate"},
+        "design": {"design", "design_gate", *({"tests_gate"} if autopilot else set())},
         "code": {"code"},
         "digest": {"result_gate"},
     }[src]
@@ -117,6 +121,21 @@ def _via_overseer(route: Callable[[PipelineState], str], src: str, lim) -> Calla
         return HOOKS[target] if on and target in hooked else target
 
     return r
+
+
+def _via_verify(route: Callable[[PipelineState], str], enabled: bool) -> Callable:
+    """Phase 7d: passing code is verified before optimising, and again before the digest."""
+    to = {"opt_baseline": "verify_code", "digest": "verify_final"}
+
+    def r(state: PipelineState) -> str:
+        target = route(state)
+        return to.get(target, target) if enabled else target
+
+    return r
+
+
+def _after_verify_code(state: PipelineState) -> str:
+    return "code" if state.get("verify_retry") else "opt_baseline"
 
 
 def _after_long_plan(state: PipelineState) -> str:
@@ -189,6 +208,8 @@ def build_graph(deps: RunDeps) -> StateGraph:
         "opt_baseline": nodes.opt_baseline,
         "optimize": nodes.optimize,
         "digest": nodes.digest,
+        "verify_code": nodes.verify_code,
+        "verify_final": nodes.verify_final,
         **{
             hook: partial(nodes.oversee, point=hook.removeprefix("oversee_"))  # e.g. design_gate
             for hook in HOOKS.values()
@@ -210,6 +231,7 @@ def build_graph(deps: RunDeps) -> StateGraph:
 
     b = deps.settings.budgets
     ov = b.overseer
+    ver = b.verify.enabled
     for target, hook in HOOKS.items():
         edge(hook, lambda s, t=target: t, [target])
     g.add_edge(START, "retrieve")
@@ -230,7 +252,12 @@ def build_graph(deps: RunDeps) -> StateGraph:
     edge("scout", lambda s: "design", ["design"])
     edge(
         "design",
-        _via_overseer(partial(_after_design, review_tests=b.gates.review_tests), "design", ov),
+        _via_overseer(
+            partial(_after_design, review_tests=b.gates.review_tests),
+            "design",
+            ov,
+            autopilot=b.autopilot.enabled,
+        ),
         [
             "tests_gate",
             "freeze",
@@ -238,17 +265,39 @@ def build_graph(deps: RunDeps) -> StateGraph:
             "design_gate",
             "oversee_design",
             "oversee_design_gate",
+            "oversee_tests",
         ],
     )
     g.add_edge("freeze", "code")
     edge(
         "code",
-        _via_overseer(partial(_after_code, max_sessions=b.coder_max_sessions), "code", ov),
-        ["tamper_gate", "opt_baseline", "dispute_gate", "code", "coder_gate", "oversee_code"],
+        _via_verify(
+            _via_overseer(partial(_after_code, max_sessions=b.coder_max_sessions), "code", ov),
+            ver,
+        ),
+        [
+            "tamper_gate",
+            "opt_baseline",
+            "verify_code",
+            "dispute_gate",
+            "code",
+            "coder_gate",
+            "oversee_code",
+        ],
     )
+    g.add_conditional_edges("verify_code", _after_verify_code, ["code", "opt_baseline"])
+    g.add_edge("verify_final", "digest")
     edge("revise_test", _after_revise, ["code", "coder_gate"])
-    edge("opt_baseline", _after_opt_baseline, ["digest", "optimize"])
-    edge("optimize", _after_optimize, ["tamper_gate", "digest", "optimize"])
+    edge(
+        "opt_baseline",
+        _via_verify(_after_opt_baseline, ver),
+        ["digest", "verify_final", "optimize"],
+    )
+    edge(
+        "optimize",
+        _via_verify(_after_optimize, ver),
+        ["tamper_gate", "digest", "verify_final", "optimize"],
+    )
     edge(
         "digest",
         _via_overseer(lambda s: "result_gate", "digest", ov),

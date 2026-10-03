@@ -242,6 +242,7 @@ class CoderInput(BaseModel):
     math_spec: MathSpec
     last_test_result: TestResult | None = None
     files: str
+    verification: str | None = None  # values the verifier found wrong (Phase 7d): fix the code
 
 
 @dataclass(frozen=True)
@@ -257,13 +258,18 @@ def run_coder_session(
     tools: CoderTools,
     ctx: CallContext,
     model: str | None = None,
+    verification: str | None = None,
 ) -> CoderSession:
     def stop(_: ToolLoopState) -> bool:
         passed = tools.last_result is not None and tools.last_result.passed
         return passed or bool(tools.disputes)
 
     payload = CoderInput(
-        spec=spec, math_spec=math_spec, last_test_result=last, files=tools.list_files(ListArgs())
+        spec=spec,
+        math_spec=math_spec,
+        last_test_result=last,
+        files=tools.list_files(ListArgs()),
+        verification=verification,
     )
     max_turns = ctx.settings.budgets.coder_max_turns
     loop = run_tool_loop(ROLE, ROLE, payload, tools.tools(), max_turns, stop, ctx, model=model)

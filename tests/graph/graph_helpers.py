@@ -77,6 +77,8 @@ def make_deps(
     overseer_max_calls: int | None = None,
     publish_modes: tuple[str, ...] = (),
     proposal: Path = PILOT,
+    autopilot: bool = False,
+    max_fix_rounds: int | None = None,
 ) -> RunDeps:
     """The overseer (Phase 7c) is off unless a test turns it on: it adds LLM calls to script."""
     settings = settings or load_settings(REPO / "tests" / "fixtures" / "config", env_file=None)
@@ -88,8 +90,16 @@ def make_deps(
         }
     )
     pub = b.publish.model_copy(update={"modes": list(publish_modes)})  # off unless a test asks
+    ap = b.autopilot.model_copy(
+        update={
+            "enabled": autopilot,
+            "max_fix_rounds": b.autopilot.max_fix_rounds
+            if max_fix_rounds is None
+            else max_fix_rounds,
+        }
+    )
     settings = settings.model_copy(
-        update={"budgets": b.model_copy(update={"overseer": ov, "publish": pub})}
+        update={"budgets": b.model_copy(update={"overseer": ov, "publish": pub, "autopilot": ap})}
     )
     if create:
         return RunDeps.create(
@@ -135,7 +145,11 @@ BROKEN_TESTS = (
 
 
 def design(
-    n: int, tests: str = GOOD_TESTS, bench: bool = False, reference: str = IMPL
+    n: int,
+    tests: str = GOOD_TESTS,
+    bench: bool = False,
+    reference: str = IMPL,
+    extra: tuple[FileSpec, ...] = (),
 ) -> MathDesign:
     """`bench=False` (default) skips the optimizer loop for that milestone."""
     pkg = f"sq{n}"
@@ -159,6 +173,7 @@ def design(
         FileSpec(path=f"src/{pkg}/__init__.py", purpose="stub", content=""),
         FileSpec(path=f"src/{pkg}/core.py", purpose="stub", content=STUB),
         FileSpec(path=f"src/{pkg}/core.py", purpose="reference", content=reference),
+        *extra,
     ]
     if bench:
         body = "def main():\n    for _ in range(2000):\n        square(2.0)\n"

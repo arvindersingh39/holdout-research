@@ -5,6 +5,8 @@ Gate nodes do nothing before `interrupt()`, so LangGraph re-running them on resu
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
 from typing import Any
 
 from langgraph.types import interrupt
@@ -29,6 +31,7 @@ from r2r.contracts import (
     MilestoneSpec,
     OptimizationOutcome,
     Roadmap,
+    VerificationReport,
 )
 from r2r.contracts.oversight import OversightPoint
 from r2r.digest.builder import build_digest, write_deviations
@@ -37,6 +40,8 @@ from r2r.graph.gates import GateRequest, gate_request
 from r2r.graph.render import render, render_attempts, render_files
 from r2r.graph.routing import is_material_change, mark_done, next_milestone
 from r2r.graph.state import PipelineState
+from r2r.harness.autopilot import Facts
+from r2r.harness.autopilot import decide as decide_gate
 from r2r.harness.bench import BenchFailed
 from r2r.harness.checks import run_checks
 from r2r.harness.frozen import FrozenTamper, freeze, restore
@@ -52,15 +57,19 @@ from r2r.harness.refdata import snapshot as snapshot_data
 from r2r.harness.reference import ReferenceError, check_reference, store_reference
 from r2r.harness.stoprule import decide
 from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
+from r2r.harness.verify import run_verify
 from r2r.ingest.documents import wrap_document
 from r2r.ingest.proposal import ingest_proposal
 from r2r.llm.gateway import BudgetExceeded, ContractViolation
 from r2r.llm.tokens import estimate_tokens
+from r2r.log import get_logger
 from r2r.publish.collect import collect_from_states
 from r2r.publish.run import run_publish
 from r2r.retrieval.context_pack import build_pack
 
 Update = dict[str, Any]
+
+log = get_logger("r2r.graph.nodes")
 
 
 def _milestone(state: PipelineState) -> Milestone:
@@ -299,6 +308,9 @@ def code(state: PipelineState, deps: RunDeps) -> Update:
         tools,
         deps.ctx(m.id, _briefing(state, "coder")),
         model=model,
+        verification=render_verification(state["verification"])
+        if state.get("verify_retry") and state.get("verification") is not None
+        else None,
     )
     attempts = state.get("tamper_attempts", 0) + len(tools.tamper_attempts)
     update: Update = {
@@ -324,7 +336,60 @@ def code(state: PipelineState, deps: RunDeps) -> Update:
     if final.passed:
         git.checkout("main")
         git.run("merge", "-q", "--ff-only", f"wip/{m.id}")
-    return update | {"test_result": final, "tamper": None}
+    return update | {"test_result": final, "tamper": None, "verify_retry": False}
+
+
+def _verify(state: PipelineState, deps: RunDeps) -> VerificationReport:
+    m = _milestone(state)
+    ws = deps.workspace()
+    return run_verify(
+        ws,
+        deps.sandbox_for(ws),
+        timeout_s=deps.settings.budgets.sandbox.bench_timeout_s,
+        run_id=deps.run_id,
+        milestone_id=m.id,
+    )
+
+
+def verify_code(state: PipelineState, deps: RunDeps) -> Update:
+    """Phase 7d: run the frozen verify scripts on passing code; wrong values go back to the
+    coder (at most `autopilot.max_fix_rounds` times) before optimising."""
+    rep = _verify(state, deps)
+    rounds = state.get("fix_rounds", 0)
+    retry = (
+        rep.status in ("mismatch", "error")
+        and rounds < deps.settings.budgets.autopilot.max_fix_rounds
+    )
+    if rep.status != "none":
+        log.warning("verification", extra={"status": rep.status, "mismatched": rep.n_mismatched})
+    return {"verification": rep, "verify_retry": retry, "fix_rounds": rounds + int(retry)}
+
+
+def verify_final(state: PipelineState, deps: RunDeps) -> Update:
+    """Phase 7d: verify again after the optimizer, so the digest reports the final code."""
+    return {"verification": _verify(state, deps), "verify_retry": False}
+
+
+def render_verification(rep: VerificationReport | None) -> str:
+    """One short paragraph for gates and the coder."""
+    if rep is None or rep.status == "none":
+        return "Verification: none (no verify scripts for this milestone)"
+    if rep.status == "verified":
+        return f"Verification: verified ({rep.n_within} of {rep.n_checked} values within tolerance)"
+    if rep.status == "unchecked_only":
+        return f"Verification: {rep.n_unchecked} values reported, none checkable (no tolerances)"
+    lines = []
+    if rep.status == "mismatch":
+        n, of = rep.n_mismatched, rep.n_checked
+        lines.append(f"Verification: mismatch: {n} of {of} values outside tolerance")
+    else:
+        lines.append(f"Verification: error in {', '.join(rep.failed_scripts) or 'a report'}")
+    for mm in rep.mismatches[:8]:
+        tol = f" (±{mm.tolerance:g})" if mm.tolerance is not None else " (exact)"
+        lines.append(f"- {mm.ref}: generated {mm.generated}, recorded {mm.recorded}{tol}")
+    if rep.status == "error" and rep.log_tail:
+        lines.append(rep.log_tail[-800:])
+    return "\n".join(lines)
 
 
 def _target(state: PipelineState, deps: RunDeps) -> float | None:
@@ -467,6 +532,23 @@ def digest(state: PipelineState, deps: RunDeps) -> Update:
         optimizer_attempts=len(state.get("opt_outcomes", [])),
         optimizer_stop=state.get("opt_stop_reason"),
     )
+    ver = state.get("verification")
+    if ver is not None and ver.status != "none":
+        metrics = {
+            **d.metrics,
+            "verification_checked": float(ver.n_checked),
+            "verification_within": float(ver.n_within),
+            "verification_mismatched": float(ver.n_mismatched),
+            "verification_unchecked": float(ver.n_unchecked),
+        }
+        bad = ver.status in ("mismatch", "error")
+        status = "partial" if bad and d.status == "met" else d.status
+        dev = d.deviations
+        if bad:
+            dev = f"{dev} Verification {ver.status}: {ver.n_mismatched} value(s) off.".strip()
+        d = d.model_validate(
+            {**d.model_dump(), "metrics": metrics, "status": status, "deviations": dev[:500]}
+        )
     if any(not c.passed for c in d.criteria):
         note = write_deviations(state["spec"], d, result, deps.ctx(m.id))
         extra = (
@@ -519,11 +601,65 @@ def publication_gate(state: PipelineState, deps: RunDeps) -> Update:
 
 
 def _ask(state: PipelineState, deps: RunDeps, req: GateRequest) -> HumanDecision:
+    auto = _autopilot(state, deps, req.gate)
+    if auto is not None:
+        return auto
     ov = deps.settings.budgets.overseer
     md = render_oversight(state, ov.flags_shown, ov.flag_chars)
     if md:
         req = req.model_copy(update={"markdown": f"{req.markdown}\n\n{md}"})
     return HumanDecision.model_validate(interrupt(req.model_dump()))
+
+
+def _decisions(deps: RunDeps) -> list[dict]:
+    path = deps.paths.root / DECISIONS_LOG
+    return [json.loads(x) for x in path.read_text().splitlines()] if path.is_file() else []
+
+
+def _autopilot(state: PipelineState, deps: RunDeps, gate: str) -> HumanDecision | None:
+    """Phase 7d (D76): plain-Python decision for routine gates, logged; None asks the human."""
+    cfg = deps.settings.budgets.autopilot
+    if not cfg.enabled:
+        return None
+    rm = state.get("roadmap")
+    m = next_milestone(rm) if rm is not None else None
+    mid = m.id if m is not None else None
+    mine = [e for e in _decisions(deps) if e.get("milestone") == mid]
+    redirects = [e for e in mine if e["action"] == "redirect"]
+    flags = list(state.get("flags") or [])
+    spent = {t for e in redirects for t in e.get("acted_on", [])}  # flags a redirect already used
+    res = state.get("test_result")
+    facts = Facts(
+        run_id=deps.run_id,
+        milestone_id=mid,
+        flags=[f for f in flags if f.text not in spent],
+        redgreen_ok=bool(state.get("redgreen_ok", True)),
+        tests_passed=None if res is None else res.passed,
+        verification=state.get("verification"),
+        auto_redirects=len(redirects),
+        first_roadmap=state.get("approved_roadmap") is None,
+        design_feedback=state.get("design_feedback") or "",
+    )
+    d = decide_gate(gate, facts, cfg)
+    if d is None:
+        return None
+    entry = {
+        "ts": datetime.now(UTC).isoformat(timespec="seconds"),
+        "gate": gate,
+        "milestone": mid,
+        "action": d.action,
+        "note": d.note,
+        "acted_on": [f.text for f in facts.flags if f.severity == "high"]
+        if d.action == "redirect"
+        else [],
+    }
+    with (deps.paths.root / DECISIONS_LOG).open("a") as f:
+        f.write(json.dumps(entry) + "\n")
+    log.warning("autopilot", extra={"gate": gate, "action": d.action, "note": d.note[:200]})
+    return d
+
+
+DECISIONS_LOG = "decisions.jsonl"
 
 
 SEVERITY = {"high": "serious", "warn": "warning", "info": "note"}
@@ -581,7 +717,7 @@ def oversee(state: PipelineState, deps: RunDeps, point: OversightPoint) -> Updat
     m = next_milestone(state["roadmap"]) if point != "plan" else None
     files: dict[str, str] = {}
     ms = state.get("math_spec")
-    if point in ("design", "design_gate", "code") and ms is not None:
+    if point in ("design", "design_gate", "tests", "code") and ms is not None:
         root = deps.workspace().root
         files = {p: (root / p).read_text() for p in ms.test_files if (root / p).is_file()}
     data = describe_data(deps.paths.root, deps.settings.budgets.reference_data.agent_chars)
@@ -656,7 +792,7 @@ def escalation_gate(state: PipelineState, deps: RunDeps) -> Update:
 
 def result_gate(state: PipelineState, deps: RunDeps) -> Update:
     digest = state["digest"]
-    md = render(digest)
+    md = render(digest) + "\n\n" + render_verification(state.get("verification"))
     attempts = render_attempts(state.get("opt_patches", []), state.get("opt_outcomes", []))
     if attempts:
         md += "\n\n" + attempts
@@ -692,6 +828,9 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
         "baselines": [],
         "baseline_note": None,
         "perf_unmet": [],
+        "verification": None,
+        "fix_rounds": 0,
+        "verify_retry": False,
         "briefings": dict(state.get("carry_briefings") or {}),
         "carry_briefings": {},
         "flags": [],
