@@ -519,22 +519,50 @@ def publication_gate(state: PipelineState, deps: RunDeps) -> Update:
 
 
 def _ask(state: PipelineState, deps: RunDeps, req: GateRequest) -> HumanDecision:
-    md = render_oversight(state, deps.settings.budgets.overseer.flags_shown)
+    ov = deps.settings.budgets.overseer
+    md = render_oversight(state, ov.flags_shown, ov.flag_chars)
     if md:
         req = req.model_copy(update={"markdown": f"{req.markdown}\n\n{md}"})
     return HumanDecision.model_validate(interrupt(req.model_dump()))
 
 
-def render_oversight(state: PipelineState, flags_shown: int) -> str:
-    """Phase 7c: what the overseer currently tells each agent, and its newest flags."""
-    briefings, flags = state.get("briefings") or {}, state.get("flags") or []
+SEVERITY = {"high": "serious", "warn": "warning", "info": "note"}
+_RANK = {"high": 0, "warn": 1, "info": 2}
+
+
+def render_oversight(
+    state: PipelineState, flags_shown: int, flag_chars: int = 280, full: bool = False
+) -> str:
+    """The overseer's flags and briefings. At gates (full=False): a one-line count, flags most
+    serious first, shortened, without evidence codes, and only the names of briefed agents, so
+    the owner can read it quickly. `r2r show <run> oversight` uses full=True."""
+    briefings, flags = state.get("briefings") or {}, list(state.get("flags") or [])
     if not briefings and not flags:
         return ""
-    lines = ["**Overseer** (advice only; it cannot route or approve)"]
-    for f in reversed(flags[-flags_shown:]):
-        lines.append(f"- ⚑ {f.severity}: {f.text} [{', '.join(f.evidence)}]")
-    for role, text in briefings.items():
-        lines.append(f"- briefing for {role}: {text}")
+    newest = list(reversed(flags))[:flags_shown]
+    shown = sorted(newest, key=lambda f: _RANK[f.severity])  # stable: newest first per level
+    counts = [
+        f"{n} {SEVERITY[k]}{'s' if n > 1 else ''}"
+        for k in ("high", "warn", "info")
+        if (n := sum(f.severity == k for f in shown))
+    ]
+    head = "**Overseer:** " + (", ".join(counts) or "no flags") + " (advice only)"
+    lines = [head]
+    for f in shown:
+        mark = "⚑ " if f.severity != "info" else ""
+        text = " ".join(f.text.split())
+        if full:
+            lines.append(f"- {mark}{SEVERITY[f.severity]}: {text} [{', '.join(f.evidence)}]")
+            continue
+        if len(text) > flag_chars:
+            text = text[: flag_chars - 1].rstrip() + "…"
+        lines.append(f"- {mark}{SEVERITY[f.severity]}: {text}")
+    if briefings and full:
+        lines += [f"- briefing for {role}: {text}" for role, text in briefings.items()]
+    elif briefings:
+        names = ", ".join(r.replace("_", " ") for r in briefings)
+        run = state.get("run_id") or "<run>"
+        lines.append(f"Briefed: {names} · details: `uv run r2r show {run} oversight`")
     return "\n".join(lines)
 
 

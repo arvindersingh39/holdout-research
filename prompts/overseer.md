@@ -21,6 +21,10 @@ retry or stop anything. Your only levers are **briefings** and **flags**.
   short, concrete and specific to this problem: what to check or do, and why, citing evidence ids.
   Good: "The reference failed AC3 with |−8192 − 0|: total_energy sums int8 spins and overflows on
   64×64. Use int64 accumulation; the test is correct (E4)." Bad: generic advice ("be careful").
+- `flags` are read by the owner at a gate, who may be a graduate student new to the project. Write
+  each flag in plain language, at most two short sentences (under 250 characters): what is wrong,
+  then what to do (e.g. "Approve", "Redirect: ...", "Check X before approving"). No evidence codes,
+  internal field names or jargon in the text; put the evidence ids in `evidence` only.
 - `flags`: issues the owner should see, with severity `high` when a criterion, expected value or
   test looks wrong, `warn` when something looks weaker or riskier than specified, `info` otherwise.
 - Return empty lists when nothing would help. Silence is better than noise.

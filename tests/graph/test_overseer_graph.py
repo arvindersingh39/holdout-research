@@ -77,7 +77,8 @@ def test_hooks_briefings_and_flags_through_one_milestone(tmp_path: Path, fake: F
     first, second = _calls(fake, "math_designer")
     assert len(_system(first)) == 1
     assert "no assert True" in _system(second)[1]["text"]
-    assert "Next spec: state tolerances" in ch.requests[-1].markdown  # active briefings shown
+    result_md = ch.requests[-1].markdown  # gates name briefed agents; the text is in `show`
+    assert "Briefed: short planner" in result_md and "Next spec: state tolerances" not in result_md
     assert "no assert True" not in ch.requests[-1].markdown  # design-stage briefing dropped
     assert res.state["digest"].status == "met"
 

@@ -27,6 +27,7 @@ overseer:                         # advisor: evidence-cited briefings, never rou
   briefing_tokens: 400            # cap per briefing
   max_briefings: 4                # per report
   flags_shown: 6                  # newest flags shown at each gate
+  flag_chars: 280                 # longer flags are shortened at gates (full text: r2r show)
   evidence_chars: 3000            # cap per evidence item (test file, failure, spec) it reads
 publish:                          # Phase 8 (D67)
   modes: [paper, package]

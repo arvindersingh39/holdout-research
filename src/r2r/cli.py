@@ -262,7 +262,7 @@ def show(
     if contract == "oversight":  # Phase 7c: active briefings and this milestone's flags
         from r2r.graph.nodes import render_oversight
 
-        md = render_oversight(values, flags_shown=1000)
+        md = render_oversight(values, flags_shown=1000, full=True)
         console.print(Markdown(md) if md else "No overseer briefings or flags yet.")
         return
     value = values.get(contract)

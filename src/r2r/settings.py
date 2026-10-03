@@ -130,6 +130,7 @@ class OverseerLimits(_Strict):
     briefing_tokens: PositiveInt  # cap per briefing
     max_briefings: PositiveInt  # per report
     flags_shown: PositiveInt  # newest flags shown at each gate
+    flag_chars: PositiveInt  # a flag longer than this is shortened at gates (full text in `show`)
     evidence_chars: PositiveInt  # cap per evidence item the overseer reads
 
 
