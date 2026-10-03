@@ -40,3 +40,12 @@ def test_full_view_keeps_everything() -> None:
 
 def test_nothing_to_show() -> None:
     assert render_oversight({"run_id": "r"}, flags_shown=6, flag_chars=120) == ""
+
+
+def test_plural_counts_read_naturally() -> None:
+    flags = [
+        OversightFlag(severity=k, text="x", evidence=["E1"])
+        for k in ("high", "high", "warn", "warn")
+    ]
+    md = render_oversight({"run_id": "r", "flags": flags}, flags_shown=6, flag_chars=120)
+    assert md.splitlines()[0].startswith("**Overseer:** 2 serious, 2 warnings")

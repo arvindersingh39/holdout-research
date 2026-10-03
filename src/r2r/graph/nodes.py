@@ -541,8 +541,9 @@ def render_oversight(
         return ""
     newest = list(reversed(flags))[:flags_shown]
     shown = sorted(newest, key=lambda f: _RANK[f.severity])  # stable: newest first per level
+    plural = {"high": "serious", "warn": "warnings", "info": "notes"}
     counts = [
-        f"{n} {SEVERITY[k]}{'s' if n > 1 else ''}"
+        f"{n} {plural[k] if n > 1 else SEVERITY[k]}"
         for k in ("high", "warn", "info")
         if (n := sum(f.severity == k for f in shown))
     ]

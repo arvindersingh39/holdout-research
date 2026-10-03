@@ -26,6 +26,17 @@ your tests afterwards. Weak tests let wrong code through; wrong tests block corr
   `bench/bench_m3_estimators.py`), never a module path like `bench.x:main`. It defines `main()` that runs the milestone's workload once at the
   benchmark problem size (the harness times repeated calls of `main()`).
 
+## Smoke tests (when the proposal limits tests to executability)
+- Each test calls the real public function directly, at the top level of the test body: no
+  `try`/`except` around it, no `pytest.skip`/`skipif`/`xfail`, no `pytest.raises(NotImplementedError)`,
+  no subprocess. On the stubs it must fail with NotImplementedError; on working code it must pass.
+- After the call, check only what executability allows: return types, array shapes, dictionary
+  keys, that output files were written, parse as JSON and contain the documented keys and entries.
+- Commands: call their Python entry function with an output path under `tmp_path`, then open and
+  parse the file. Never pass a test just because a file exists or something was printed.
+- Invalid inputs: `pytest.raises(<the documented exception>)` only for documented invalid inputs
+  (a stub's NotImplementedError then still fails the test, as required).
+
 ## Reference solution (required)
 - Also write a minimal, correct, unoptimised implementation of every stub as files with
   `purpose: "reference"` and the **same paths** as the stubs (e.g. `src/pkg/core.py`). The harness
