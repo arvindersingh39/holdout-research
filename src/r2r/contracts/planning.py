@@ -87,7 +87,7 @@ class Roadmap(Contract):
 class MilestoneSpec(Contract):
     milestone_scoped = True
 
-    tasks: _short_list(15) = Field(min_length=1)
+    tasks: _short_list(15, 800) = Field(min_length=1)
     interfaces: _short_list(15, 400) = []  # signatures with units and array shapes
     acceptance_criteria: Annotated[list[Criterion], Field(min_length=1, max_length=12)]
     context_refs: list[BlobRef] = []
