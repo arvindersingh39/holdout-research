@@ -207,3 +207,16 @@ def test_final_verify_only_after_an_accepted_simplification() -> None:
         _via_verify(lambda s: "digest", enabled=False)({"opt_outcomes": [outcome(True)]})
         == "digest"
     )
+
+
+def test_current_milestone_moves_off_a_finished_one() -> None:
+    """A planner that leaves current_milestone_id on a finished milestone (seen when extending a
+    run) is corrected to the next open one, so D82's no-replan rule still applies."""
+    from r2r.graph.routing import current_on_open
+
+    stale = mark_done(roadmap(), "M1")  # current is still M1
+    assert current_on_open(stale).current_milestone_id == "M2"
+    fine = stale.model_copy(update={"current_milestone_id": "M2"})
+    assert current_on_open(fine) == fine
+    done = mark_done(stale, "M2")
+    assert current_on_open(done).current_milestone_id == "M1"  # nothing open: left as it was

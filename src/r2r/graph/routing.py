@@ -46,6 +46,16 @@ def mark_done(roadmap: Roadmap, milestone_id: str) -> Roadmap:
     return Roadmap.model_validate(data)
 
 
+def current_on_open(roadmap: Roadmap) -> Roadmap:
+    """Point `current_milestone_id` at the next open milestone if it names a finished one."""
+    by_id = {m.id: m for m in roadmap.milestones}
+    cur = by_id.get(roadmap.current_milestone_id or "")
+    nxt = next_milestone(roadmap)
+    if cur is not None and cur.status in _FINISHED and nxt is not None:
+        return roadmap.model_copy(update={"current_milestone_id": nxt.id})
+    return roadmap
+
+
 def advance_without_replan(
     roadmap: Roadmap | None,
     digest: ResultDigest | None,

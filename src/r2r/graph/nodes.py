@@ -41,6 +41,7 @@ from r2r.graph.gates import GateRequest, gate_request
 from r2r.graph.render import render, render_attempts, render_files
 from r2r.graph.routing import (
     advance_without_replan,
+    current_on_open,
     is_material_change,
     mark_done,
     next_milestone,
@@ -140,6 +141,7 @@ def long_plan(state: PipelineState, deps: RunDeps) -> Update:
         deps.ctx(briefing=_briefing(state, "long_planner")),
         proposal=_proposal_text(state, deps),
     )
+    new = current_on_open(new)
     gates = deps.settings.budgets.gates
     approved = state.get("approved_roadmap")
     if approved is None:

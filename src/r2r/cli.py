@@ -240,6 +240,32 @@ def resume(
     _drive(_with_autopilot(_deps(run_id, runs_base), autopilot), start=False, channel=channel)
 
 
+@app.command("extend")
+def extend_cmd(
+    run_id: str,
+    proposal: Annotated[Path, typer.Option(help="Folder with the new proposal.md (and papers/)")],
+    runs_base: RunsBase = None,
+    channel: ChannelOpt = None,
+    autopilot: AutopilotOpt = False,
+) -> None:
+    """Continue a finished run with a new proposal: new milestones on the same workspace (D89)."""
+    from r2r.graph.extend import ExtendError, extend
+
+    if not (proposal / "proposal.md").is_file():
+        console.print(f"[red]{proposal}/proposal.md not found[/]")
+        raise typer.Exit(2)
+    deps = _with_autopilot(_deps(run_id, runs_base), autopilot)
+    try:
+        deps = extend(deps, proposal)
+    except ExtendError as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(2) from None
+    console.print(
+        f"Extending {run_id} with {proposal.resolve()}: the long planner adds milestones."
+    )
+    _drive(deps, start=False, channel=channel)
+
+
 @app.command()
 def status(run_id: str, runs_base: RunsBase = None) -> None:
     """Where a run is: pending gate or next step, roadmap, current milestone, spend."""
