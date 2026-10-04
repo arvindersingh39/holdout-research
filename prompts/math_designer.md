@@ -10,6 +10,8 @@ your tests afterwards. Weak tests let wrong code through; wrong tests block corr
 - `spec.signatures`: the public functions with types and units, matching the stubs.
 - `spec.tolerances`: every numeric tolerance your tests use, by name.
 - `spec.test_files`, `spec.check_files`, `spec.bench`: the paths of the files you write.
+- `spec.sanity_checks`: the sanity checks below (each file also listed in `spec.test_files`). Only
+  a milestone with no numerical output may omit them, and then `spec.no_numerics_reason` says why.
 
 ## Files
 - **Tests** `tests/frozen/test_<milestone>_<topic>.py` (e.g. `test_m1_pricer.py`). Every test
@@ -24,7 +26,43 @@ your tests afterwards. Weak tests let wrong code through; wrong tests block corr
   identities of the derivation with SymPy and `assert` them (exit non-zero on failure).
 - **Bench** `bench/bench_main.py`: `spec.bench.entrypoint` is that **file path** (e.g.
   `bench/bench_m3_estimators.py`), never a module path like `bench.x:main`. It defines `main()` that runs the milestone's workload once at the
-  benchmark problem size (the harness times repeated calls of `main()`).
+  benchmark problem size (the harness times repeated calls of `main()`). Write one for every
+  milestone with code: after the tests pass, a simplifier trims the code and the bench guards
+  its speed. Keep it to a few seconds.
+
+## Sanity checks (always, unless the milestone has no numerical output)
+The harness requires them whatever the proposal says about tests: they never use recorded values,
+they compare the code with an independent numerical solution of the equations in your
+formulation. Write `tests/frozen/sanity/test_sanity_<topic>.py` with:
+- `oracle_<name>(...)` functions that compute the expected result **from the equations alone**,
+  using only numpy, scipy, math and the standard library. An oracle never imports or calls the
+  package (the harness rejects that): it is a second, independent, simple implementation.
+- `test_<CRITERION>__S<k>_<what>` functions that call the package's public function and compare
+  it with an oracle on a **tiny instance** (a few nodes, a few steps, small samples). Each check
+  runs in seconds; `max_seconds` (≤ 10 by default) is enforced on your reference solution.
+- One `spec.sanity_checks` entry per check: `id` "S1", "S2", …, the criteria it supports, its
+  `kind`, a one-line `statement`, the `file`.
+
+Pick the kinds that fit the problem (several per milestone when the maths allows):
+1. `initial_condition`: the solution at t=0 or on the boundary equals the given input.
+2. `independent_solver`: the same equations solved generically agree, e.g.
+   `scipy.integrate.solve_ivp` for an ODE the code integrates with its own stepper, `numpy.linalg`
+   for a linear system, brute-force enumeration for a small combinatorial or optimisation problem,
+   quadrature for an integral.
+3. `limit_case`: inputs with a known answer: zero budget equals no policy, zero infection stays
+   zero, one node or one step has a closed form, a symmetric input gives a symmetric output.
+4. `conservation`: totals, ranges and budgets hold: allocations sum to the budget, probabilities
+   lie in [0, 1], prevalences stay in [0, n].
+5. `convergence_order`: halving the step changes the result as the method's order predicts
+   (RK4: error ratio near 16).
+6. `optimizer_claim`: an optimiser's result is at least as good as each starting point and a
+   simple baseline, and it actually ran the requested iterations or evaluations.
+7. `statistical`: a Monte Carlo estimate lies within 4 standard errors of an exact or
+   independently computed value.
+
+Tolerances come from the method (solver tolerances, step size, standard error), never from
+wishful precision. A sanity test must fail on the stubs with NotImplementedError and pass on your
+reference, like every test.
 
 ## Smoke tests (when the proposal limits tests to executability)
 - Each test calls the real public function directly, at the top level of the test body: no
