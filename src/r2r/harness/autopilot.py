@@ -28,6 +28,7 @@ class Facts:
     auto_redirects: int = 0  # automatic redirects already made for this milestone
     first_roadmap: bool = False
     design_feedback: str = ""
+    cites_data: bool = False  # the milestone's criteria refer to the owner's recorded data
 
 
 def decide(gate: str, f: Facts, cfg: AutopilotConfig) -> HumanDecision | None:
@@ -46,6 +47,8 @@ def decide(gate: str, f: Facts, cfg: AutopilotConfig) -> HumanDecision | None:
         return _redirect(f, cfg, [x for x in (f.design_feedback, *serious) if x])
     if gate == "result":
         ver = f.verification.status if f.verification is not None else "none"
+        if f.cites_data and ver in ("none", "unchecked_only"):
+            return None  # D84: nothing was compared with the owner's values; the owner decides
         if f.tests_passed and ver in VERIFIED_OK and not serious:
             return _make(f, "approve", f"tests pass, verification {ver}, no serious flags")
         return None

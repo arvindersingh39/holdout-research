@@ -36,6 +36,7 @@ class CaseOutcome:
     name: str  # e.g. test_AC2__parity[0.5]
     outcome: Literal["passed", "failed", "error", "skipped"]
     text: str  # failure message plus traceback tail, empty when passed
+    seconds: float = 0.0  # JUnit duration (sanity-check time limits, D83)
 
     @property
     def criterion_id(self) -> str | None:
@@ -94,7 +95,11 @@ def parse_cases(xml_text: str) -> list[CaseOutcome]:
                 outcome = tag if tag != "failure" else "failed"  # type: ignore[assignment]
                 text = f"{el.get('message', '')}\n{el.text or ''}".strip()
                 break
-        cases.append(CaseOutcome(test_id, _file_of(classname, name), name, outcome, text))
+        try:
+            seconds = float(case.get("time") or 0.0)
+        except ValueError:
+            seconds = 0.0
+        cases.append(CaseOutcome(test_id, _file_of(classname, name), name, outcome, text, seconds))
     return cases
 
 

@@ -15,6 +15,7 @@ from r2r.contracts import (
     Issue,
     MathDesign,
     MathSpec,
+    SanityCheck,
 )
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest
@@ -144,25 +145,52 @@ BROKEN_TESTS = (
 )
 
 
+SANITY = """from {pkg}.core import square
+
+
+def oracle_square(x):
+    return x * x
+
+
+def test_AC1__S1_square_matches_formula():
+    assert square(3.0) == oracle_square(3.0)
+"""
+
+
 def design(
     n: int,
     tests: str = GOOD_TESTS,
     bench: bool = False,
     reference: str = IMPL,
     extra: tuple[FileSpec, ...] = (),
+    sanity: bool | None = None,
 ) -> MathDesign:
-    """`bench=False` (default) skips the optimizer loop for that milestone."""
+    """`bench=False` (default) skips the optimizer loop for that milestone. A sanity check (D83)
+    is included with the good tests only, so a deliberately broken design stays broken."""
+    sanity = tests == GOOD_TESTS if sanity is None else sanity
     pkg = f"sq{n}"
     meta = {"created_by": "math_designer", "run_id": "g", "milestone_id": f"M{n}"}
     test_file = f"tests/frozen/test_m{n}_square.py"
     check_file = f"checks/check_m{n}_square.py"
+    sanity_file = f"tests/frozen/sanity/test_sanity_m{n}.py"
     spec = MathSpec(
         **meta,
         formulation="f(x) = x^2",
         algorithm="multiply",
         signatures=["square(x: float) -> float"],
-        test_files=[test_file],
+        test_files=[test_file, sanity_file] if sanity else [test_file],
         check_files=[check_file],
+        sanity_checks=[
+            SanityCheck(
+                id="S1",
+                criterion_ids=["AC1"],
+                kind="limit_case",
+                statement="square agrees with x*x written from the formula",
+                file=sanity_file,
+            )
+        ]
+        if sanity
+        else [],
         bench=BenchSpec(entrypoint=f"bench/bench_m{n}.py", problem_size="2000 calls")
         if bench
         else None,
@@ -170,6 +198,11 @@ def design(
     files = [
         FileSpec(path=test_file, purpose="test", content=tests.format(pkg=pkg)),
         FileSpec(path=check_file, purpose="check", content="assert (2 + 3) ** 2 == 25\n"),
+        *(
+            [FileSpec(path=sanity_file, purpose="test", content=SANITY.format(pkg=pkg))]
+            if sanity
+            else []
+        ),
         FileSpec(path=f"src/{pkg}/__init__.py", purpose="stub", content=""),
         FileSpec(path=f"src/{pkg}/core.py", purpose="stub", content=STUB),
         FileSpec(path=f"src/{pkg}/core.py", purpose="reference", content=reference),

@@ -128,3 +128,41 @@ def test_booleans_and_numbers_never_pass_as_each_other() -> None:
     ref = {"flag": True, "count": 1}
     c = compare_entries([{"ref": "flag", "generated": 1}, {"ref": "count", "generated": True}], ref)
     assert (c.n_checked, c.n_mismatched) == (2, 2)
+
+
+# --- D84: verify scripts can't read or copy the owner's recorded values -------------------------
+
+PEEK = """
+import json, pathlib
+def main():
+    rec = json.loads(pathlib.Path("tests/frozen/data/recorded_values.json").read_text())
+    out = pathlib.Path("results/verify/verify_peek.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    mu = rec["ensemble"]["graphs"][1]["mu"]
+    out.write_text(json.dumps({"entries": [{"ref": "ensemble.graphs[1].mu", "generated": mu}]}))
+if __name__ == "__main__":
+    main()
+"""
+
+
+def test_recorded_data_is_hidden_while_scripts_run(ws: Workspace) -> None:
+    (ws.root / "tests/frozen/verify/verify_peek.py").write_text(PEEK)
+    rep = _run(ws)
+    assert rep.status == "error" and "verify_peek.py" in rep.failed_scripts[0]
+    assert (ws.root / "tests/frozen/data/recorded_values.json").is_file()  # put back afterwards
+
+
+def test_copied_values_are_an_error() -> None:
+    entries = [
+        {"ref": "ensemble.graphs[0].mu", "generated": 1.0},
+        {"ref": "ensemble.graphs[1].mu", "generated": 3.05},
+        {"ref": "graph0.B1[0]", "generated": 0.001},
+        {"ref": "graph0.B1[1]", "generated": 0.003},
+    ]
+    c = compare_entries(entries, REF)
+    assert any("copied" in e for e in c.errors)
+    computed = [dict(e, generated=e["generated"] + 1e-4) for e in entries]
+    assert not any("copied" in e for e in compare_entries(computed, REF).errors)
+    stubs = ((0, 52), (1, 162))
+    exact_ints = [{"ref": f"ensemble.graphs[{i}].n_stubs", "generated": n} for i, n in stubs]
+    assert not compare_entries(exact_ints * 2, REF).errors  # counts legitimately match exactly

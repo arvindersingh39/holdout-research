@@ -87,6 +87,13 @@ def test_result_gate(kw: dict, approved: bool) -> None:
         assert d is None
 
 
+def test_nothing_checked_when_criteria_cite_recorded_data_goes_to_the_owner() -> None:
+    """D84: 'verified' needs values actually compared when the milestone cites the owner's data."""
+    for status in ("none", "unchecked_only"):
+        assert decide("result", facts(verification=_ver(status), cites_data=True), CFG) is None
+    assert decide("result", facts(cites_data=True), CFG).action == "approve"  # verified
+
+
 def test_publication() -> None:
     assert decide("publication", facts(), CFG) is None
     assert (

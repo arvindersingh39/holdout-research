@@ -189,7 +189,7 @@ def test_perf_test_missed_by_reference_reaches_tests_gate_and_coder_meets_it(
     tmp_path: Path, fake: FakeLLM
 ) -> None:
     _start(fake)
-    fake.script("math_designer", design(1, PERF_TESTS, reference=SLOW_REF))
+    fake.script("math_designer", design(1, PERF_TESTS, reference=SLOW_REF, sanity=True))
     fake.script("coder", *coder_pass(1))
     ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
     _, res = _run(tmp_path, fake, ch)

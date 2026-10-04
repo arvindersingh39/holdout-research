@@ -156,6 +156,12 @@ class VerifyConfig(_Strict):
     enabled: bool
 
 
+class SanityConfig(_Strict):
+    """D83: sanity checks against independent numerical oracles."""
+
+    required: bool = True  # every milestone needs one, or MathSpec.no_numerics_reason
+
+
 class PublishLimits(_Strict):
     """Phase 8 (D67): paper and package output."""
 
@@ -201,6 +207,10 @@ class BudgetsConfig(_Strict):
     optimizer_min_gain: Annotated[float, Field(ge=0, lt=1)]
     optimizer_patience: PositiveInt
     optimizer_target_runtime_s: PositiveFloat | None = None
+    simplify_min_cut: Annotated[float, Field(gt=0, lt=1)] = 0.03  # D85: complexity cut to accept
+    simplify_runtime_guard: Annotated[float, Field(ge=1)] = (
+        1.10  # accepted patch: at most 10% slower
+    )
     bench_repeats: PositiveInt
     sandbox: SandboxLimits
     ingest: IngestLimits
@@ -212,6 +222,7 @@ class BudgetsConfig(_Strict):
     reference_data: ReferenceDataLimits
     autopilot: AutopilotConfig
     verify: VerifyConfig
+    sanity: SanityConfig = SanityConfig()
     gates: GatesConfig
     contract_token_caps: dict[str, PositiveInt]
 

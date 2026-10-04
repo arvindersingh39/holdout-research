@@ -13,7 +13,11 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from r2r.contracts import Mismatch, VerificationReport
@@ -24,6 +28,7 @@ from r2r.harness.workspace import Workspace
 VERIFY_DIR = "tests/frozen/verify"
 OUT_DIR = "results/verify"
 MAX_MISMATCHES = 20
+COPY_MIN = 3  # this many decimal values all equal to the recorded ones: copied, not computed
 _TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 
 
@@ -69,6 +74,7 @@ def _number(x: Any) -> bool:
 def compare_entries(entries: list[dict[str, Any]], reference: dict[str, Any]) -> Comparison:
     tolerances = reference.get("tolerances") or {}
     c = Comparison()
+    decimals = copies = 0
     for e in entries:
         ref, gen = str(e.get("ref", "")), e.get("generated")
         try:
@@ -76,6 +82,9 @@ def compare_entries(entries: list[dict[str, Any]], reference: dict[str, Any]) ->
         except RefError as err:
             c.errors.append(str(err))
             continue
+        if isinstance(rec, float) and _number(gen):
+            decimals += 1
+            copies += gen == rec
         tol = tolerance_for(ref, tolerances)
         if tol is not None and _number(rec) and _number(gen):
             ok = abs(gen - rec) <= tol + 1e-12
@@ -97,6 +106,11 @@ def compare_entries(entries: list[dict[str, Any]], reference: dict[str, Any]) ->
                         ref=ref[:300], generated=_scalar(gen), recorded=_scalar(rec), tolerance=tol
                     )
                 )
+    if decimals >= COPY_MIN and copies == decimals:  # D84: computed values never all match
+        c.errors.append(
+            f"copied: all {decimals} decimal values equal the recorded values exactly; "
+            "compute them with the package"
+        )
     return c
 
 
@@ -133,6 +147,50 @@ def run_verify(
     out_dir.mkdir(parents=True)
     reference = _reference(ws)
     total, failed, logs = Comparison(), [], []
+    with _hidden(ws.root / DATA_DIR):  # D84: scripts compute values; they never read them
+        _run_scripts(ws, sandbox, scripts, timeout_s, reference, total, failed, logs)
+    if failed or total.errors:
+        status = "error"
+    elif total.n_mismatched:
+        status = "mismatch"
+    elif total.n_checked:
+        status = "verified"
+    else:
+        status = "unchecked_only"
+    tail = "\n".join("\n".join(logs).splitlines()[-40:])[-4000:]
+    return VerificationReport(
+        status=status,
+        scripts=[p.relative_to(ws.root).as_posix() for p in scripts],
+        failed_scripts=failed,
+        n_checked=total.n_checked,
+        n_within=total.n_within,
+        n_mismatched=total.n_mismatched,
+        n_unchecked=total.n_unchecked,
+        mismatches=total.mismatches,
+        log_tail=tail,
+        **meta,
+    )
+
+
+@contextmanager
+def _hidden(path: Path) -> Iterator[None]:
+    """Move `path` out of the workspace for the duration; always put it back."""
+    if not path.exists():
+        yield
+        return
+    parking = Path(tempfile.mkdtemp(prefix="r2r-hidden-")) / path.name
+    shutil.move(str(path), parking)
+    try:
+        yield
+    finally:
+        if path.exists():  # a script recreated it: drop that, restore the owner's files
+            shutil.rmtree(path, ignore_errors=True)
+        shutil.move(str(parking), path)
+        shutil.rmtree(parking.parent, ignore_errors=True)
+
+
+def _run_scripts(ws, sandbox, scripts, timeout_s, reference, total, failed, logs) -> None:
+    out_dir = ws.root / OUT_DIR
     for path in scripts:
         rel = path.relative_to(ws.root).as_posix()
         code = (
@@ -162,25 +220,5 @@ def run_verify(
         total.n_mismatched += c.n_mismatched
         total.n_unchecked += c.n_unchecked
         total.mismatches += c.mismatches[: MAX_MISMATCHES - len(total.mismatches)]
-        logs += [f"{rel}: bad ref {e}" for e in c.errors]
-    if failed or any("bad ref" in line for line in logs):
-        status = "error"
-    elif total.n_mismatched:
-        status = "mismatch"
-    elif total.n_checked:
-        status = "verified"
-    else:
-        status = "unchecked_only"
-    tail = "\n".join("\n".join(logs).splitlines()[-40:])[-4000:]
-    return VerificationReport(
-        status=status,
-        scripts=[p.relative_to(ws.root).as_posix() for p in scripts],
-        failed_scripts=failed,
-        n_checked=total.n_checked,
-        n_within=total.n_within,
-        n_mismatched=total.n_mismatched,
-        n_unchecked=total.n_unchecked,
-        mismatches=total.mismatches,
-        log_tail=tail,
-        **meta,
-    )
+        total.errors += c.errors
+        logs += [f"{rel}: {e}" for e in c.errors]

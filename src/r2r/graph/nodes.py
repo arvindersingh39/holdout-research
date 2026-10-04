@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from langgraph.types import interrupt
@@ -60,6 +61,8 @@ from r2r.harness.refdata import describe as describe_data
 from r2r.harness.refdata import install as install_data
 from r2r.harness.refdata import snapshot as snapshot_data
 from r2r.harness.reference import ReferenceError, check_reference, store_reference
+from r2r.harness.sanity import check_sanity
+from r2r.harness.sanity import packages as sanity_packages
 from r2r.harness.stoprule import decide
 from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
 from r2r.harness.verify import run_verify
@@ -306,12 +309,22 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
         out.spec.test_files,
         reference_cases=ref_cases,
     )
+    sanity = check_sanity(
+        out.spec,
+        ws.root,
+        ref_cases,
+        sanity_packages(ws.root / "src"),
+        required=deps.settings.budgets.sanity.required,
+    )
+    ok = rg.ok and not sanity
+    problems = [] if rg.ok else [rg.describe()]
+    problems += [f"Sanity check: {p}" for p in sanity]
     return {
         "math_spec": out.spec,
-        "redgreen_ok": rg.ok,
+        "redgreen_ok": ok,
         "test_result": result,
-        "design_attempts": failed if rg.ok else failed + 1,
-        "design_feedback": None if rg.ok else rg.describe(),
+        "design_attempts": failed if ok else failed + 1,
+        "design_feedback": None if ok else "\n".join(problems),
         "perf_unmet": rg.perf_unmet,
     }
 
@@ -652,6 +665,17 @@ def _decisions(deps: RunDeps) -> list[dict]:
     return [json.loads(x) for x in path.read_text().splitlines()] if path.is_file() else []
 
 
+def _cites_data(state: PipelineState, deps: RunDeps, m: Milestone | None) -> bool:
+    """D84: do this milestone's criteria refer to the owner's recorded data?"""
+    stems = [Path(n).stem for n in _reference_data(deps)]
+    if not stems or m is None:
+        return False
+    spec = state.get("spec")
+    crits = [*m.acceptance_criteria, *(spec.acceptance_criteria if spec is not None else [])]
+    text = " ".join(c.text for c in crits)
+    return DATA_DIR in text or any(s in text for s in stems)
+
+
 def _autopilot(state: PipelineState, deps: RunDeps, gate: str) -> HumanDecision | None:
     """Phase 7d (D76): plain-Python decision for routine gates, logged; None asks the human."""
     cfg = deps.settings.budgets.autopilot
@@ -675,6 +699,7 @@ def _autopilot(state: PipelineState, deps: RunDeps, gate: str) -> HumanDecision 
         auto_redirects=len(redirects),
         first_roadmap=state.get("approved_roadmap") is None,
         design_feedback=state.get("design_feedback") or "",
+        cites_data=_cites_data(state, deps, m),
     )
     d = decide_gate(gate, facts, cfg)
     if d is None:
