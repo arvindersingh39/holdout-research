@@ -290,3 +290,21 @@ def test_tamper_during_run_detected(ws: Workspace, box: LocalProcessBackend) -> 
     )
     with pytest.raises(FrozenTamper):
         run_tests(ws, box, timeout_s=60, **META)
+
+
+def test_large_failure_output_is_shrunk_to_fit_the_cap() -> None:
+    """study-3: 10 failures with long tracebacks made TestResult ~2,135 tokens (cap 1,500) and
+    crashed the design step. Code-built results now shorten tails, then drop failures, to fit."""
+    from r2r.contracts import get_contract_caps
+
+    cases = "".join(
+        f'<testcase classname="tests.frozen.test_m2" name="test_AC{i}__case">'
+        f'<failure message="AssertionError: case {i}">{"long traceback line " * 400}</failure>'
+        "</testcase>"
+        for i in range(1, 13)
+    )
+    xml = f'<testsuites><testsuite tests="12">{cases}</testsuite></testsuites>'
+    r = parse_junit(xml, frozen_ok=True, duration_s=1.0, run_id="run-test", milestone_id="M1")
+    assert r.n_failed == 12 and not r.passed  # counts stay exact
+    assert r.failures and r.failures[0].message == "AssertionError: case 1"
+    assert r.token_estimate() <= get_contract_caps()["TestResult"]

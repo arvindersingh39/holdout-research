@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from r2r.contracts import Failure, TestResult
+from r2r.contracts import ContractTooLarge, Failure, TestResult
 from r2r.harness.frozen import verify
 from r2r.harness.sandbox import SandboxBackend
 from r2r.harness.workspace import RESULTS_DIR, Workspace
@@ -118,17 +118,34 @@ def _result(
     run_id: str,
     milestone_id: str,
 ) -> TestResult:
-    return TestResult(
-        created_by="harness",
-        run_id=run_id,
-        milestone_id=milestone_id,
-        passed=n_failed == 0 and n_passed > 0 and frozen_ok,
-        n_passed=n_passed,
-        n_failed=n_failed,
-        failures=failures[:MAX_FAILURES],
-        frozen_ok=frozen_ok,
-        duration_s=duration_s,
-    )
+    def build(fs: list[Failure]) -> TestResult:
+        return TestResult(
+            created_by="harness",
+            run_id=run_id,
+            milestone_id=milestone_id,
+            passed=n_failed == 0 and n_passed > 0 and frozen_ok,
+            n_passed=n_passed,
+            n_failed=n_failed,
+            failures=fs,
+            frozen_ok=frozen_ok,
+            duration_s=duration_s,
+        )
+
+    fs = failures[:MAX_FAILURES]
+    # Code builds this, so it must fit its token cap rather than crash the run (study-3):
+    # shorten the tracebacks first, then keep fewer failures. Counts stay exact.
+    for tail_chars, keep in ((None, len(fs)), (600, len(fs)), (200, len(fs)), (200, 5), (0, 3)):
+        trimmed = [
+            f
+            if tail_chars is None
+            else f.model_copy(update={"tail": f.tail[-tail_chars:] if tail_chars else ""})
+            for f in fs[:keep]
+        ]
+        try:
+            return build(trimmed)
+        except ContractTooLarge:
+            continue
+    return build([])
 
 
 def _from_cases(
