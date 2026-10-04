@@ -835,8 +835,8 @@ def roadmap_gate(state: PipelineState, deps: RunDeps) -> Update:
         if not isinstance(d.edited, Roadmap):
             raise ValueError("an edit at the roadmap gate must supply a Roadmap")
         update |= {"roadmap": d.edited, "approved_roadmap": d.edited}
-    elif d.action == "redirect":
-        update["human_note"] = d.note
+    elif d.action == "redirect":  # flags were about the old roadmap; the briefing guides the redo
+        update |= {"human_note": d.note, "flags": []}
     else:
         update["status"] = "stopped"
     return update

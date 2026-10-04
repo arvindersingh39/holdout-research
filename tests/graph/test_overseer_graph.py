@@ -213,3 +213,20 @@ def test_redirect_clears_stale_overseer_advice(tmp_path: Path, fake: FakeLLM) ->
     third = _calls(fake, "math_designer")[2]
     assert "STALE-ADVICE" not in str(third.messages)
     assert "STALE-FLAG" not in ch.requests[-1].markdown
+
+
+def test_roadmap_redirect_clears_flags_on_the_old_roadmap(tmp_path: Path, fake: FakeLLM) -> None:
+    """study-3 extension: a flag on roadmap v30 was still shown at the v31 gate after it was fixed."""
+    fake.script("long_planner", ROADMAP, ROADMAP)
+    fake.script(
+        "overseer",
+        rep("plan", [brief("long_planner", "Recompute AC1's value.")], [FLAG]),
+        rep("plan"),
+    )
+    ch = FakeChannel(decide("redirect", note="Fix AC1's value."), decide("stop"))
+    _run(tmp_path, fake, ch)
+    assert ch.gates == ["roadmap", "roadmap"]
+    assert FLAG["text"] in ch.requests[0].markdown
+    assert FLAG["text"] not in ch.requests[1].markdown  # the redone roadmap starts clean
+    second = _calls(fake, "long_planner")[1]
+    assert "Recompute AC1's value." in _system(second)[1]["text"]  # the advice still reaches it
