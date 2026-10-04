@@ -156,12 +156,6 @@ class VerifyConfig(_Strict):
     enabled: bool
 
 
-class SanityConfig(_Strict):
-    """D83: sanity checks against independent numerical oracles."""
-
-    required: bool = True  # every milestone needs one, or MathSpec.no_numerics_reason
-
-
 class PublishLimits(_Strict):
     """Phase 8 (D67): paper and package output."""
 
@@ -222,7 +216,6 @@ class BudgetsConfig(_Strict):
     reference_data: ReferenceDataLimits
     autopilot: AutopilotConfig
     verify: VerifyConfig
-    sanity: SanityConfig = SanityConfig()
     gates: GatesConfig
     contract_token_caps: dict[str, PositiveInt]
 

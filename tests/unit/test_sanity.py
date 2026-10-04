@@ -153,22 +153,24 @@ def _spec(checks, unchecked=None):
     )
 
 
-def test_every_criterion_needs_a_check_or_a_reason(tmp_path) -> None:
-    """D87: numerical criteria get sanity checks; the rest are listed with the reason."""
+def test_criteria_without_a_check_are_skipped_not_rejected(tmp_path) -> None:
+    """D90: a criterion with no sanity or contract check no longer rejects the design; it is
+    listed as unchecked (the owner judges it). Unknown criterion ids are still a problem."""
+    from r2r.harness.sanity import skip_unchecked
+
     f = tmp_path / "tests/frozen/sanity/test_sanity_ode.py"
     f.parent.mkdir(parents=True)
     f.write_text(GOOD)
-    spec = _spec([_check()])
-    assert check_sanity(spec, tmp_path, [], PKG, criteria=["AC1"]) == []
-    missing = check_sanity(spec, tmp_path, [], PKG, criteria=["AC1", "AC2"])
-    assert any("AC2" in p and "unchecked_criteria" in p for p in missing)
-    listed = _spec([_check()], {"AC2": "writes a JSON file; no numerical output"})
-    assert check_sanity(listed, tmp_path, [], PKG, criteria=["AC1", "AC2"]) == []
+    spec = _spec([_check()], {"AC3": "writes a JSON file"})
+    assert check_sanity(spec, tmp_path, [], PKG, criteria=["AC1", "AC2", "AC3"]) == []
+    out = skip_unchecked(spec, ["AC1", "AC2", "AC3"])
+    assert out.unchecked_criteria["AC3"] == "writes a JSON file"  # the designer's reason stays
+    assert "no sanity or contract check" in out.unchecked_criteria["AC2"]
+    assert "AC1" not in out.unchecked_criteria
+    nothing = skip_unchecked(_spec([]), ["AC1"])
+    assert list(nothing.unchecked_criteria) == ["AC1"]
     unknown = _spec([_check(criterion_ids=["AC9"])])
     assert any("AC9" in p for p in check_sanity(unknown, tmp_path, [], PKG, criteria=["AC1"]))
-    all_unchecked = _spec([], {"AC1": "interfaces only"})
-    assert check_sanity(all_unchecked, tmp_path, [], PKG, criteria=["AC1"]) == []
-    assert check_sanity(_spec([]), tmp_path, [], PKG, criteria=["AC1"], required=False) == []
 
 
 def test_slow_sanity_file_rejected_on_reference_timing(tmp_path) -> None:

@@ -62,7 +62,7 @@ from r2r.harness.refdata import describe as describe_data
 from r2r.harness.refdata import install as install_data
 from r2r.harness.refdata import snapshot as snapshot_data
 from r2r.harness.reference import ReferenceError, check_reference, store_reference
-from r2r.harness.sanity import check_sanity
+from r2r.harness.sanity import check_sanity, skip_unchecked
 from r2r.harness.sanity import packages as sanity_packages
 from r2r.harness.stoprule import decide
 from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
@@ -289,6 +289,8 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
             "design_attempts": failed + 1,
             "design_feedback": f"The design could not be written: {e}",
         }
+    criteria = [c.id for c in spec.acceptance_criteria]
+    out = out.model_copy(update={"spec": skip_unchecked(out.spec, criteria)})  # D90
     contract = write_contract_tests(ws.root, m.id, out.spec.contract_checks)  # D88
     if contract:
         out = out.model_copy(
@@ -334,8 +336,7 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
         ws.root,
         ref_cases,
         sanity_packages(ws.root / "src"),
-        criteria=[c.id for c in spec.acceptance_criteria],
-        required=deps.settings.budgets.sanity.required,
+        criteria=criteria,
         contract_file=contract,
     )
     ok = rg.ok and not sanity
@@ -408,6 +409,9 @@ def code(state: PipelineState, deps: RunDeps) -> Update:
         )
     except FrozenTamper as e:
         return update | {"tamper": str(e)}
+    nothing_to_run = final.n_passed == final.n_failed == 0 and final.frozen_ok
+    if nothing_to_run and not state["math_spec"].test_files:  # D90: every criterion skipped
+        final = final.model_copy(update={"passed": True})
     git = Git(ws)
     git.commit(f"{m.id}: coder session {n + 1} ({'pass' if final.passed else 'fail'})")
     if final.passed:
@@ -611,7 +615,7 @@ def digest(state: PipelineState, deps: RunDeps) -> Update:
         d = d.model_validate(
             {**d.model_dump(), "metrics": metrics, "status": status, "deviations": dev[:500]}
         )
-    if any(not c.passed for c in d.criteria):
+    if any(c.checked and not c.passed for c in d.criteria):  # skipped ones are the owner's
         note = write_deviations(state["spec"], d, result, deps.ctx(m.id))
         extra = (
             f" Optimizer stopped: {state['opt_stop_reason']}."
@@ -828,15 +832,17 @@ def roadmap_gate(state: PipelineState, deps: RunDeps) -> Update:
     first = state.get("approved_roadmap") is None
     title = "Approve the first roadmap" if first else f"Approve roadmap changes (v{rm.version})"
     d = _ask(state, deps, gate_request("roadmap", title, rm))
-    update: Update = {"human_decision": d}
+    # the flags were about this roadmap: settled by the owner's decision either way (the
+    # briefings stay: they guide the planners)
+    update: Update = {"human_decision": d, "flags": []}
     if d.action == "approve":
         update["approved_roadmap"] = rm
     elif d.action == "edit":
         if not isinstance(d.edited, Roadmap):
             raise ValueError("an edit at the roadmap gate must supply a Roadmap")
         update |= {"roadmap": d.edited, "approved_roadmap": d.edited}
-    elif d.action == "redirect":  # flags were about the old roadmap; the briefing guides the redo
-        update |= {"human_note": d.note, "flags": []}
+    elif d.action == "redirect":
+        update["human_note"] = d.note
     else:
         update["status"] = "stopped"
     return update

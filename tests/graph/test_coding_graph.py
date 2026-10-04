@@ -202,16 +202,20 @@ def test_unusable_design_is_a_failed_attempt_not_a_crash(tmp_path: Path, fake: F
     assert res.status == "stopped"
 
 
-def test_design_without_sanity_check_is_redesigned(tmp_path: Path, fake: FakeLLM) -> None:
-    """D83: every milestone needs a sanity check against an independent oracle."""
+def test_criterion_without_a_check_is_skipped_and_left_to_the_owner(
+    tmp_path: Path, fake: FakeLLM
+) -> None:
+    """D90: no sanity or contract check for AC1 skips it instead of rejecting the design."""
     _start(fake)
-    fake.script("math_designer", design(1, sanity=False), design(1))
-    fake.script("coder", *coder_pass(1))
+    fake.script("math_designer", design(1, sanity=False))
+    fake.script("coder", "nothing to implement against")  # no checks: the session passes at once
     ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
-    _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "result"]
-    second = [r for r in fake.calls if r.role == "math_designer"][1]
-    assert "AC1 has no sanity check" in str(second.messages[1]["content"])
+    _, res = _run(tmp_path, fake, ch)
+    assert ch.gates == ["roadmap", "tests", "result"]  # accepted on the first design
+    assert "AC1" in res.state["math_spec"].unchecked_criteria
+    ac1 = res.state["digest"].criteria[0]
+    assert not ac1.checked and "no sanity or contract check" in ac1.evidence
+    assert "AC1: not checked (you judge)" in ch.requests[-1].markdown
 
 
 def test_oracle_that_calls_the_package_is_redesigned(tmp_path: Path, fake: FakeLLM) -> None:

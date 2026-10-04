@@ -15,9 +15,9 @@ block correct code.
   `test_files`, and `test_files` holds sanity files only.
 - `spec.contract_checks`: interfaces, documented errors and output files, described as data
   (see below).
-- `spec.unchecked_criteria`: only criteria neither kind of check can decide (e.g. how a figure
-  looks), each with a one-line reason. The owner judges these. Every other criterion needs at
-  least one sanity check or contract check.
+- `spec.unchecked_criteria`: criteria neither kind of check can decide (e.g. how a figure looks),
+  each with a one-line reason. Cover every other criterion with a sanity or contract check where
+  you can: a criterion left without one is skipped and the owner judges it by hand.
 - `spec.bench`, and `spec.figure_scripts` when the milestone draws figures.
 - Never write unit tests outside `tests/frozen/sanity/` or SymPy scripts under `checks/`: the
   harness rejects them.

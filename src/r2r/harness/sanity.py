@@ -98,6 +98,17 @@ def lint_sanity(text: str, pkgs: set[str]) -> list[str]:
     return problems
 
 
+SKIPPED = "no sanity or contract check: skipped, the owner judges it"
+
+
+def skip_unchecked(spec: MathSpec, criteria: Sequence[str]) -> MathSpec:
+    """D90: criteria the design gives no sanity or contract check are skipped, not rejected:
+    they join `unchecked_criteria` (the designer's own reasons stay) for the owner to judge."""
+    covered = {cid for c in [*spec.sanity_checks, *spec.contract_checks] for cid in c.criterion_ids}
+    missing = {cid: SKIPPED for cid in criteria if cid not in covered}
+    return spec.model_copy(update={"unchecked_criteria": missing | dict(spec.unchecked_criteria)})
+
+
 def check_sanity(
     spec: MathSpec,
     root: Path,
@@ -105,25 +116,15 @@ def check_sanity(
     pkgs: Iterable[str],
     *,
     criteria: Sequence[str],
-    required: bool = True,
     contract_file: str | None = None,
 ) -> list[str]:
-    """Design-time problems with the milestone's sanity checks: coverage of `criteria` (D87),
-    lint, presence and speed on the reference solution."""
+    """Design-time problems with the milestone's checks: unknown criteria, lint, presence and
+    speed on the reference solution. Criteria without a check are skipped (`skip_unchecked`)."""
     problems = []
-    if required:
-        checks = [*spec.sanity_checks, *spec.contract_checks]  # D88
-        covered = {cid for c in checks for cid in c.criterion_ids}
-        unknown = sorted(covered - set(criteria))
-        if unknown:
-            problems.append(f"sanity checks name unknown criteria: {', '.join(unknown)}")
-        for cid in criteria:
-            if cid not in covered and cid not in spec.unchecked_criteria:
-                problems.append(
-                    f"{cid} has no sanity check: add one (an independent oracle from "
-                    "the equations), a contract check (interface, documented error or output "
-                    "file), or list it in unchecked_criteria with the reason"
-                )
+    named = {cid for c in [*spec.sanity_checks, *spec.contract_checks] for cid in c.criterion_ids}
+    unknown = sorted(named - set(criteria))
+    if unknown:
+        problems.append(f"checks name unknown criteria: {', '.join(unknown)}")
     by_file: dict[str, float] = {}
     for c in spec.sanity_checks:
         by_file[c.file] = by_file.get(c.file, 0.0) + c.max_seconds

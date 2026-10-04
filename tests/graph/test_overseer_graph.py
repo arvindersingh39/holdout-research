@@ -230,3 +230,18 @@ def test_roadmap_redirect_clears_flags_on_the_old_roadmap(tmp_path: Path, fake: 
     assert FLAG["text"] not in ch.requests[1].markdown  # the redone roadmap starts clean
     second = _calls(fake, "long_planner")[1]
     assert "Recompute AC1's value." in _system(second)[1]["text"]  # the advice still reaches it
+
+
+def test_approved_roadmap_flags_do_not_reach_the_designer(tmp_path: Path, fake: FakeLLM) -> None:
+    """study-3 M9: a flag on the (approved) roadmap became part of an automatic design redirect."""
+    fake.script("long_planner", ROADMAP)
+    fake.script("short_planner", SPEC)
+    fake.script("coordinator", PASS)
+    fake.script("math_designer", design(1, VACUOUS_TESTS), design(1))
+    fake.script("overseer", rep("plan", flags=[FLAG]), rep("design"))
+    ch = FakeChannel(decide("approve"), decide("stop"))
+    _run(tmp_path, fake, ch)
+    assert FLAG["text"] in ch.requests[0].markdown  # shown at the roadmap gate
+    second = _calls(fake, "math_designer")[1]
+    assert FLAG["text"] not in str(second.messages)
+    assert FLAG["text"] not in ch.requests[-1].markdown  # nor at the next gate
