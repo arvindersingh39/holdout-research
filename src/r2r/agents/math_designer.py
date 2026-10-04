@@ -11,6 +11,7 @@ import json
 from pydantic import BaseModel
 
 from r2r.contracts import BaselineCard, FileSpec, MathDesign, MathSpec, Milestone, MilestoneSpec
+from r2r.harness.gitops import Git
 from r2r.harness.refdata import DATA_DIR
 from r2r.harness.workspace import UnsafePath, Workspace, safe_path
 from r2r.llm.gateway import CallContext, call_structured
@@ -82,11 +83,24 @@ def _remove_leftovers(ws: Workspace, frozen: set[str]) -> None:
                 p.unlink()
 
 
+def _reset_code(ws: Workspace) -> None:
+    """src/ and bench/ go back to the last commit: stubs of rejected designs are uncommitted and
+    broke every later design's imports (study-3 M7). Committed code is the earlier milestones'."""
+    if not ws.git_dir.exists():
+        return
+    git = Git(ws)
+    git.run("clean", "-q", "-fd", "--", "src", "bench")
+    for top in ("src", "bench"):
+        if git.run("ls-files", "--", top).strip():
+            git.run("checkout", "-q", "HEAD", "--", top)
+
+
 def write_design(ws: Workspace, design: MathDesign, previous: MathSpec | None) -> list[str]:
     """Write the design's files. Never overwrites frozen files or code from earlier milestones;
-    on a redesign, the previous attempt's files are removed first."""
+    uncommitted files of earlier attempts are removed first."""
     frozen = _frozen_files(ws)
     _remove_leftovers(ws, frozen)
+    _reset_code(ws)
     if previous is not None:
         old = [*previous.test_files, *previous.check_files, *previous.figure_scripts]
         if previous.bench:
@@ -106,7 +120,7 @@ def write_design(ws: Workspace, design: MathDesign, previous: MathSpec | None) -
             raise DesignError(f"{f.path} is the owner's reference data (read-only); load it")
         if f.path in frozen:
             raise DesignError(f"{f.path} is a frozen file from an earlier milestone")
-        if f.path.startswith("src/") and path.exists() and path.read_text() and previous is None:
+        if f.path.startswith("src/") and path.exists() and path.read_text():
             raise DesignError(f"{f.path} already exists: add new modules instead of rewriting it")
         targets.append((f, path))
     written = []
