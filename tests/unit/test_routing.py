@@ -134,3 +134,46 @@ def test_route_after_design_and_code() -> None:
     assert not needs_test_review("first_milestone", mark_done(rm, "M1"))
     assert needs_test_review("always", mark_done(rm, "M1"))
     assert not needs_test_review("never", rm)
+
+
+# --- leak 3: a met result with nothing to change advances without a replan ---------------------
+
+
+def _met(status: str = "met", mid: str = "M1"):
+    from samples import result_digest
+
+    return result_digest().model_copy(update={"status": status, "milestone_id": mid})
+
+
+def test_met_result_advances_to_next_milestone_without_replan() -> None:
+    from r2r.graph.routing import advance_without_replan
+
+    rm = mark_done(roadmap(), "M1")
+    out = advance_without_replan(rm, _met(), note=None, issues=[])
+    assert out is not None
+    assert out.current_milestone_id == "M2" and out.version == rm.version
+    assert [m.status for m in out.milestones] == ["done", "pending"]
+
+
+def test_last_milestone_met_needs_no_replan() -> None:
+    from r2r.graph.routing import advance_without_replan
+
+    rm = mark_done(mark_done(roadmap(), "M1"), "M2").model_copy(
+        update={"current_milestone_id": "M2"}
+    )
+    out = advance_without_replan(rm, _met(mid="M2"), note=None, issues=[])
+    assert out is not None and next_milestone(out) is None
+
+
+def test_replan_when_anything_needs_the_planner() -> None:
+    from r2r.graph.routing import advance_without_replan
+
+    done = mark_done(roadmap(), "M1")
+    issue = Issue(target="roadmap", severity="high", text="M2 is too big")
+    assert advance_without_replan(done, _met("partial"), None, []) is None  # not met
+    assert advance_without_replan(done, _met(), "add a figure", []) is None  # owner's note
+    assert advance_without_replan(done, _met(), None, [issue]) is None  # coordinator issue
+    assert advance_without_replan(roadmap(), _met(), None, []) is None  # result redirected
+    assert advance_without_replan(None, None, None, []) is None  # first roadmap
+    moved = done.model_copy(update={"current_milestone_id": "M2"})
+    assert advance_without_replan(moved, _met(), None, []) is None  # already advanced

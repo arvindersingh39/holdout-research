@@ -114,7 +114,8 @@ def test_roadmap_stays_under_cap_over_five_cycles(tmp_path: Path, fake: FakeLLM)
     for n in range(1, 6):
         script_milestone(fake, n)
     deps = make_deps(tmp_path, fake)
-    ch = FakeChannel(*[decide("approve")] * 7)  # roadmap, tests, 5 results
+    # an owner note at each result asks for a replan (a met result alone keeps the plan)
+    ch = FakeChannel(decide("approve"), decide("approve"), *[decide("approve", note="go on")] * 5)
     with open_graph(deps) as graph:
         res = drive(graph, deps.run_id, ch, start=True)
     assert res.status == "complete"

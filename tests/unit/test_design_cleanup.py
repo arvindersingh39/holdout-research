@@ -72,3 +72,15 @@ def test_redesign_cannot_rewrite_committed_src(tmp_path: Path) -> None:
     Git(ws).commit("M1: coder session 1 (pass)")
     with pytest.raises(DesignError, match="already exists"):
         write_design(ws, design, previous=math_spec())
+
+
+def test_tolerance_names_fit_owner_reference_paths() -> None:
+    """Leak 1: recorded-value paths are longer than 60 characters."""
+    from samples import math_spec
+
+    ref = "report_signal_regime_approximate.gap_over_uniform.B4_optimised_static"
+    ms = math_spec().model_copy(update={}).model_dump()
+    ms["tolerances"] = {ref: 0.05}
+    from r2r.contracts import MathSpec
+
+    assert MathSpec.model_validate(ms).tolerances[ref] == 0.05

@@ -22,7 +22,7 @@ class MathSpec(Contract):
     formulation: Text(4000, 1)  # LaTeX
     algorithm: Text(3000, 1)
     signatures: Annotated[list[Text(400, 1)], Field(min_length=1, max_length=20)]
-    tolerances: dict[Text(60, 1), float] = {}
+    tolerances: dict[Text(120, 1), float] = {}  # names may be reference-data paths (D82)
     test_files: Annotated[list[WorkspacePath], Field(min_length=1, max_length=20)]
     check_files: Annotated[list[WorkspacePath], Field(max_length=20)] = []
     bench: BenchSpec | None = None

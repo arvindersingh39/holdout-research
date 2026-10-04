@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from r2r.contracts import CoordinatorVerdict, HumanDecision, Milestone, Roadmap
+from r2r.contracts import CoordinatorVerdict, HumanDecision, Issue, Milestone, ResultDigest, Roadmap
 
 END = "__end__"
 GateKind = Literal[
@@ -44,6 +44,26 @@ def mark_done(roadmap: Roadmap, milestone_id: str) -> Roadmap:
         if m["id"] == milestone_id:
             m["status"] = "done"
     return Roadmap.model_validate(data)
+
+
+def advance_without_replan(
+    roadmap: Roadmap | None,
+    digest: ResultDigest | None,
+    note: str | None,
+    issues: list[Issue],
+) -> Roadmap | None:
+    """After an approved, fully met result with no note and no roadmap issues, the plan stands:
+    the next open milestone starts without a long-planner call (leak 3). None means replan."""
+    if roadmap is None or digest is None or note or issues or digest.status != "met":
+        return None
+    by_id = {m.id: m for m in roadmap.milestones}
+    done = by_id.get(digest.milestone_id)
+    if roadmap.current_milestone_id != digest.milestone_id or done is None:
+        return None
+    if done.status != "done":
+        return None
+    nxt = next_milestone(roadmap)
+    return roadmap.model_copy(update={"current_milestone_id": nxt.id if nxt else done.id})
 
 
 def keep_finished(old: Roadmap | None, new: Roadmap) -> Roadmap:

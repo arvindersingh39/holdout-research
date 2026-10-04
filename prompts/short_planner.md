@@ -17,6 +17,9 @@ implements it, so ambiguity here becomes wrong tests or wrong code later.
   value lists into the spec.
 - Cover every acceptance criterion of the milestone. Copy each criterion (same id) into
   `acceptance_criteria`, tightened if needed but never weakened.
+- Field limits, in characters: each criterion's `text` ≤ 300, each task ≤ 800, each interface
+  ≤ 400, each risk ≤ 300, `rationale` ≤ 600. Tightening a criterion makes it more precise, not longer:
+  keep it one sentence and put file names, field paths and step details in `tasks`.
 - `tasks`: concrete steps a competent engineer could follow without guessing.
 - `interfaces`: exact Python signatures with parameter types, array shapes and units, e.g.
   `price_call(S0: float, K: float, T: float [years], r: float [cont. comp.], sigma: float,

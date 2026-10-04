@@ -43,7 +43,7 @@ def _payloads(fake: FakeLLM, role: str) -> list[str]:
 
 
 def test_full_pass_path_to_completion(tmp_path: Path, fake: FakeLLM) -> None:
-    fake.script("long_planner", ROADMAP, ROADMAP, ROADMAP)
+    fake.script("long_planner", ROADMAP)  # met results need no replan (leak 3)
     script_milestone(fake, 1)
     script_milestone(fake, 2)
     ch = FakeChannel(*[decide("approve")] * 4)
@@ -53,7 +53,7 @@ def test_full_pass_path_to_completion(tmp_path: Path, fake: FakeLLM) -> None:
     assert res.status == "complete"
     rm: Roadmap = res.state["roadmap"]
     assert [m.status for m in rm.milestones] == ["done", "done"]
-    assert rm.version == 3
+    assert rm.version == 1  # one planner call: the scripted roadmap is used up, no more allowed
     roles = ("long_planner", "short_planner", "coordinator", "math_designer", "coder")
     assert all(fake.pending(r) == 0 for r in roles)
 

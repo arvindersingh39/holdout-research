@@ -38,7 +38,12 @@ from r2r.digest.builder import build_digest, write_deviations
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest, gate_request
 from r2r.graph.render import render, render_attempts, render_files
-from r2r.graph.routing import is_material_change, mark_done, next_milestone
+from r2r.graph.routing import (
+    advance_without_replan,
+    is_material_change,
+    mark_done,
+    next_milestone,
+)
 from r2r.graph.state import PipelineState
 from r2r.harness.autopilot import Facts
 from r2r.harness.autopilot import decide as decide_gate
@@ -108,6 +113,21 @@ def retrieve(state: PipelineState, deps: RunDeps) -> Update:
 
 def long_plan(state: PipelineState, deps: RunDeps) -> Update:
     old = state.get("roadmap")
+    kept = advance_without_replan(
+        old, state.get("digest"), state.get("human_note"), _issues(state, "roadmap")
+    )
+    if kept is not None:  # the plan stands: no model call, no roadmap gate
+        log.info(
+            "roadmap kept; next milestone starts", extra={"milestone": kept.current_milestone_id}
+        )
+        return {
+            "roadmap": kept,
+            "approved_roadmap": kept,
+            "human_note": None,
+            "spec": None,
+            "verdict": None,
+            "split_request": False,
+        }
     new = run_long_planner(
         state["brief"],
         old,
