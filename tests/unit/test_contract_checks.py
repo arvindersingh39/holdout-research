@@ -224,3 +224,34 @@ def test_designer_may_not_write_the_generated_folder() -> None:
     data["spec"]["contract_checks"] = [CHECKS[0].model_dump(), CHECKS[0].model_dump()]
     with pytest.raises(ValidationError, match="unique"):
         MathDesign.model_validate(data)
+
+
+def test_contract_schemas_are_provider_safe() -> None:
+    """study-3 M9: Google's structured output rejected the MathDesign schema (INVALID_ARGUMENT)
+    once fields used patternProperties (key patterns) and an empty any-JSON schema."""
+    import json
+
+    from pydantic import BaseModel
+
+    import r2r.contracts as contracts
+
+    for name in dir(contracts):
+        obj = getattr(contracts, name)
+        if isinstance(obj, type) and issubclass(obj, BaseModel):
+            schema = obj.model_json_schema()
+            assert "patternProperties" not in json.dumps(schema), name
+            assert all(v != {} for v in schema.get("$defs", {}).values()), name
+
+
+def test_args_are_json_text_validated_by_code() -> None:
+    check = c(
+        kind="raises", call="pkg.core.scale", args='{"x": [1.0], "factor": 0}', raises="ValueError"
+    )
+    assert check.args_dict() == {"x": [1.0], "factor": 0}
+    assert c(
+        kind="raises", call="pkg.core.scale", args={"x": 1}, raises="ValueError"
+    ).args_dict() == {"x": 1}
+    with pytest.raises(ValidationError, match="JSON object"):
+        c(kind="raises", call="pkg.core.scale", args="[1, 2]", raises="ValueError")
+    with pytest.raises(ValidationError, match="not an argument name"):
+        c(kind="raises", call="pkg.core.scale", args='{"1bad": 1}', raises="ValueError")

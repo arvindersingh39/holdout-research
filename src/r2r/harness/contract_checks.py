@@ -148,7 +148,12 @@ def contract_file(milestone_id: str) -> str:
 
 
 def render(milestone_id: str, checks: Sequence[ContractCheck]) -> str:
-    payload = json.dumps({c.id: c.model_dump(mode="json") for c in checks}, sort_keys=True)
+    data = {
+        c.id: c.model_dump(mode="json")
+        | {"args": c.args_dict(), "method_args": c.method_args_dict()}
+        for c in checks
+    }
+    payload = json.dumps(data, sort_keys=True)
     tests = "".join(
         f"\n\ndef test_{cid}__{c.id}_{c.kind}():\n    run_check(CHECKS[{c.id!r}])\n"
         for c in checks

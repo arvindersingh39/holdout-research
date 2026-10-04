@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, JsonValue, PositiveFloat, model_validator
+from pydantic import Field, PositiveFloat, field_validator, model_validator
 
 from r2r.contracts.base import Contract, CriterionId, Part, Text
 from r2r.contracts.common import FileSpec, WorkspacePath
@@ -41,6 +43,8 @@ class SanityCheck(Part):
 
 DottedPath = Annotated[str, Field(pattern=r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)+$", max_length=200)]
 ArgName = Annotated[str, Field(pattern=r"^[A-Za-z_]\w*$", max_length=60)]
+_ARG_NAME = re.compile(r"^[A-Za-z_]\w*$")
+_CRITERION_ID = re.compile(r"^AC\d{1,3}$")
 
 
 class ContractCheck(Part):
@@ -51,15 +55,41 @@ class ContractCheck(Part):
     criterion_ids: Annotated[list[CriterionId], Field(min_length=1, max_length=5)]
     kind: Literal["interface", "raises", "output"]
     call: DottedPath  # module-level callable or class, e.g. pkg.mod.func or pkg.mod.Cls.method
-    args: dict[ArgName, JsonValue] = {}  # keyword arguments; {"np": [...]} is an array, "{tmp}"
+    # keyword arguments as a JSON object (text, so the schema stays a plain string for every
+    # provider); {"np": [...]} is a numpy array and the string "{tmp}" a fresh temporary folder
+    args: Text(2000) = "{}"
     method: ArgName | None = None  # then call this method on the returned object
-    method_args: dict[ArgName, JsonValue] = {}
+    method_args: Text(2000) = "{}"
     params: Annotated[list[ArgName], Field(max_length=20)] | None = None  # interface, in order
     raises: DottedPath | ArgName | None = None  # exception class (builtin name or dotted path)
     file: Annotated[str, Field(max_length=200)] | None = None  # output path under "{tmp}"
     format: Literal["json", "csv", "npy", "png", "txt"] | None = None
     keys: Annotated[list[Text(120, 1)], Field(max_length=20)] = []  # json paths or csv columns
     max_seconds: Annotated[float, Field(gt=0, le=30)] = 10.0
+
+    @field_validator("args", "method_args", mode="before")
+    @classmethod
+    def _json_object(cls, v: object) -> object:
+        if isinstance(v, dict):
+            v = json.dumps(v)
+        if not isinstance(v, str):
+            return v
+        try:
+            obj = json.loads(v)
+        except ValueError:
+            raise ValueError("args must be a JSON object") from None
+        if not isinstance(obj, dict):
+            raise ValueError("args must be a JSON object")
+        bad = [k for k in obj if not _ARG_NAME.match(k)]
+        if bad:
+            raise ValueError(f"{bad} is not an argument name")
+        return v
+
+    def args_dict(self) -> dict[str, object]:
+        return json.loads(self.args)
+
+    def method_args_dict(self) -> dict[str, object]:
+        return json.loads(self.method_args)
 
     @model_validator(mode="after")
     def _kind_fields(self) -> Self:
@@ -89,7 +119,17 @@ class MathSpec(Contract):
     sanity_checks: Annotated[list[SanityCheck], Field(max_length=12)] = []
     contract_checks: Annotated[list[ContractCheck], Field(max_length=20)] = []  # D88
     # D87: criteria with no numerical output, and why; the owner judges them at the result gate
-    unchecked_criteria: dict[CriterionId, Text(200, 1)] = {}
+    # (keys are criterion ids, checked below: a key pattern would put patternProperties into the
+    # schema, which Google's structured output rejects)
+    unchecked_criteria: dict[Text(10, 1), Text(200, 1)] = {}
+
+    @field_validator("unchecked_criteria")
+    @classmethod
+    def _criterion_keys(cls, v: dict[str, str]) -> dict[str, str]:
+        bad = [k for k in v if not _CRITERION_ID.match(k)]
+        if bad:
+            raise ValueError(f"unchecked_criteria keys must be criterion ids like AC1: {bad}")
+        return v
 
 
 class MathDesign(Contract):
