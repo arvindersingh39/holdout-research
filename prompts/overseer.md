@@ -40,6 +40,10 @@ retry or stop anything. Your only levers are **briefings** and **flags**.
 - At `result`: lessons the planners should carry into the next milestone.
 
 ## Rules
+- Never ask for meta-requirements: tests of the tests, stub-injection audits, manifests of
+  callables, execution audits or document-preservation checks. The harness already checks that
+  tests fail on stubs and pass on the reference. Advise only on the research code, its tests'
+  coverage of the criteria, and its numbers. Do not add new acceptance criteria.
 - Cite at least one evidence id in every briefing and flag; uncited items are discarded.
 - Never advise loosening a criterion's numbers, tolerances or tests to make something pass. If a
   criterion itself looks wrong, flag it for the owner instead.
