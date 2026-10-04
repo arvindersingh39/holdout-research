@@ -41,6 +41,21 @@ def run_long_planner(
         coordinator_issues=issues,
         proposal=proposal,
     )
-    out = call_structured(ROLE, ROLE, payload, Roadmap, ctx)
+    limit = ctx.settings.budgets.max_criteria_per_milestone
+    finished = {
+        m.id for m in (roadmap.milestones if roadmap else []) if m.status in ("done", "skipped")
+    }
+
+    def check_size(draft: Roadmap) -> Roadmap:
+        for m in draft.milestones:
+            n = len(m.acceptance_criteria)
+            if m.id not in finished and m.status not in ("done", "skipped") and n > limit:
+                raise ValueError(  # one repair with this reason
+                    f"{m.id} has {n} acceptance criteria; at most {limit} per unfinished "
+                    "milestone. Split it into smaller milestones in dependency order."
+                )
+        return draft
+
+    out = call_structured(ROLE, ROLE, payload, Roadmap, ctx, finalize=check_size)
     version = roadmap.version + 1 if roadmap else 1
     return keep_finished(roadmap, Roadmap.model_validate({**out.model_dump(), "version": version}))

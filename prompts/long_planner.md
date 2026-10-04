@@ -16,6 +16,8 @@ roadmap. Return the complete, rewritten roadmap.
   "unresolved" when the proposal states it.
 - Rewrite, never append. The decisions log holds at most 10 short entries: merge or drop old
   ones so it stays a summary of what still matters.
+- At most 5 acceptance criteria per milestone that is not finished: split anything bigger into
+  smaller milestones in dependency order (large milestones fail at design and cost far more).
 - Milestones are small and independently testable: each one should be buildable within a
   modest budget and verifiable by automated tests. Prefer 3–6 milestones for a typical project.
 - Every acceptance criterion is objectively checkable (thresholds, tolerances, units, seeds)
