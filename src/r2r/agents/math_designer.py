@@ -72,10 +72,21 @@ def _frozen_files(ws: Workspace) -> set[str]:
     return set(json.loads(ws.frozen_manifest.read_text())["files"])
 
 
+def _remove_leftovers(ws: Workspace, frozen: set[str]) -> None:
+    """Files under tests/frozen/ and checks/ that no milestone froze are leftovers of rejected
+    designs; they would fail every later design's reference check (study-3). Owner data stays."""
+    for top in ("tests/frozen", "checks"):
+        for p in sorted((ws.root / top).rglob("*")):
+            rel = p.relative_to(ws.root).as_posix()
+            if p.is_file() and rel not in frozen and not rel.startswith(DATA_DIR + "/"):
+                p.unlink()
+
+
 def write_design(ws: Workspace, design: MathDesign, previous: MathSpec | None) -> list[str]:
     """Write the design's files. Never overwrites frozen files or code from earlier milestones;
     on a redesign, the previous attempt's files are removed first."""
     frozen = _frozen_files(ws)
+    _remove_leftovers(ws, frozen)
     if previous is not None:
         old = [*previous.test_files, *previous.check_files, *previous.figure_scripts]
         if previous.bench:

@@ -890,6 +890,8 @@ def tests_gate(state: PipelineState, deps: RunDeps) -> Update:
             "human_decision": d,
             "design_attempts": 0,
             "design_feedback": f"The owner reviewed the tests and asks: {d.note}",
+            "flags": [],
+            "briefings": {},
         }
     return {"human_decision": d}
 
@@ -907,8 +909,8 @@ def design_gate(state: PipelineState, deps: RunDeps) -> Update:
     update: Update = {"human_decision": d}
     if d.action == "stop":
         update["status"] = "stopped"
-    elif d.action == "redirect":
-        update["human_note"] = d.note
+    elif d.action == "redirect":  # fresh advice for the redesign: earlier flags are spent
+        update |= {"human_note": d.note, "flags": [], "briefings": {}}
     return update
 
 

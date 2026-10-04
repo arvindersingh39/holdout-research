@@ -193,3 +193,30 @@ def test_design_gate_gets_the_overseers_read(tmp_path: Path, fake: FakeLLM) -> N
     ]
     assert points == ["plan", "spec", "design", "design_gate"]
     assert gate_flag["text"] in ch.requests[-1].markdown
+
+
+def test_redirect_clears_stale_overseer_advice(tmp_path: Path, fake: FakeLLM) -> None:
+    """study-3: briefings and flags from before a redirect kept steering the redesign."""
+    stale_flag = {"severity": "high", "text": "STALE-FLAG about an old design", "evidence": ["E1"]}
+    fake.script("long_planner", ROADMAP, ROADMAP)
+    fake.script("short_planner", SPEC, SPEC)
+    fake.script("coordinator", PASS, PASS)
+    fake.script("math_designer", design(1, VACUOUS_TESTS), design(1, VACUOUS_TESTS), design(1))
+    fake.script(
+        "overseer",
+        rep("plan"),
+        rep("spec"),
+        rep(
+            "design",
+            [brief("math_designer", "STALE-ADVICE: write stub-injection audits")],
+            [stale_flag],
+        ),
+        rep("design_gate"),
+        rep("spec"),
+    )
+    ch = FakeChannel(decide("approve"), decide("redirect", note="Simplify M1."), decide("stop"))
+    _run(tmp_path, fake, ch)
+    assert ch.gates == ["roadmap", "design", "tests"]
+    third = _calls(fake, "math_designer")[2]
+    assert "STALE-ADVICE" not in str(third.messages)
+    assert "STALE-FLAG" not in ch.requests[-1].markdown
