@@ -386,3 +386,18 @@ def test_other_bad_requests_are_not_swallowed(ctx: CallContext) -> None:
     fake.script("long_planner", LLMCallError("BadRequestError: context length exceeded"))
     with pytest.raises(LLMCallError, match="context length"):
         _call(ctx)
+
+
+def test_structured_attempts_is_configurable(ctx: CallContext, fake: FakeLLM) -> None:
+    """Owner request (study-3): more repair attempts before a ContractViolation."""
+    s = ctx.settings
+    three = s.model_copy(
+        update={"budgets": s.budgets.model_copy(update={"structured_attempts": 3})}
+    )
+    ctx3 = CallContext(**{**ctx.__dict__, "settings": three})
+    fake.script("long_planner", "not json", "still not json", roadmap())
+    assert _call(ctx3).goal == roadmap().goal
+    assert len([c for c in fake.calls if c.role == "long_planner"]) == 3
+    fake.script("long_planner", "bad", "bad")
+    with pytest.raises(ContractViolation):
+        _call(ctx)  # the pinned test config keeps 2

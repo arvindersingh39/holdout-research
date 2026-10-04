@@ -192,6 +192,7 @@ class BudgetsConfig(_Strict):
     usd_cap_run: PositiveFloat
     usd_cap_milestone: PositiveFloat
     coordinator_max_revise_rounds: Annotated[int, Field(ge=0)]
+    structured_attempts: Annotated[int, Field(ge=1, le=5)] = 2  # answer + repairs per call
     coder_max_turns: PositiveInt
     coder_escalate_after: PositiveInt
     coder_max_sessions: PositiveInt

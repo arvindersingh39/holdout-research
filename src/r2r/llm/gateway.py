@@ -103,7 +103,8 @@ def call_structured[C: BaseModel](
     meta = {"created_by": role, "run_id": ctx.run_id, "milestone_id": ctx.milestone_id}
 
     error = ""
-    for attempt in (1, 2):
+    attempts = ctx.settings.budgets.structured_attempts
+    for attempt in range(1, attempts + 1):
         req = LLMRequest(
             role=role,
             model=model,
@@ -142,7 +143,7 @@ def call_structured[C: BaseModel](
             error = _describe(e)
             log.warning("invalid output", extra={"role": role, "attempt": attempt, "error": error})
             ctx.ledger.annotate_latest(ctx.run_id, role, f"rejected output: {error}"[:500])
-        if attempt == 1:
+        if attempt < attempts:
             messages += [
                 {"role": "assistant", "content": raw or ""},
                 {"role": "user", "content": REPAIR.format(error=error)},

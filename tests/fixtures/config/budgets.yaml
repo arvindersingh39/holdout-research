@@ -1,6 +1,7 @@
 usd_cap_run: 20.0
 usd_cap_milestone: 3.0
 coordinator_max_revise_rounds: 2
+structured_attempts: 2           # answer + repair attempts per structured LLM call
 coder_max_turns: 25
 coder_escalate_after: 2          # failed sessions before switching to escalate_to
 coder_max_sessions: 3            # then a human gate
