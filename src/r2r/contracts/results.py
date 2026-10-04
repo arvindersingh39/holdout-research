@@ -16,6 +16,7 @@ class CriterionResult(Part):
     id: CriterionId
     passed: bool
     evidence: Text(120)
+    checked: bool = True  # False: no numerical sanity check; the owner judges it (D87)
 
 
 class ResultDigest(Contract):

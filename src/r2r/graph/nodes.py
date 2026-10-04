@@ -300,8 +300,9 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
             milestone_id=m.id,
             timeout_s=timeout,
         )
+    checked = [c.id for c in spec.acceptance_criteria if c.id not in out.spec.unchecked_criteria]
     rg = assess(
-        [c.id for c in spec.acceptance_criteria],
+        checked,  # D87: criteria without numerical output are the owner's to judge
         cases,
         checks,
         out.spec.test_files,
@@ -312,6 +313,7 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
         ws.root,
         ref_cases,
         sanity_packages(ws.root / "src"),
+        criteria=[c.id for c in spec.acceptance_criteria],
         required=deps.settings.budgets.sanity.required,
     )
     ok = rg.ok and not sanity
@@ -562,6 +564,7 @@ def digest(state: PipelineState, deps: RunDeps) -> Update:
         runtime_final_s=state.get("opt_runtime_s"),
         optimizer_attempts=len(state.get("opt_outcomes", [])),
         optimizer_stop=state.get("opt_stop_reason"),
+        unchecked=state["math_spec"].unchecked_criteria,
     )
     ver = state.get("verification")
     if ver is not None and ver.status != "none":
@@ -682,6 +685,7 @@ def _autopilot(state: PipelineState, deps: RunDeps, gate: str) -> HumanDecision 
         first_roadmap=state.get("approved_roadmap") is None,
         design_feedback=state.get("design_feedback") or "",
         cites_data=_cites_data(state, deps, m),
+        unchecked=sorted(ms.unchecked_criteria) if (ms := state.get("math_spec")) else [],
     )
     d = decide_gate(gate, facts, cfg)
     if d is None:

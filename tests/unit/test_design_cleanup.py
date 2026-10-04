@@ -33,7 +33,7 @@ def test_unfrozen_leftovers_are_removed(tmp_path: Path) -> None:
     assert not (root / "tests/frozen/test_m7_old_design.py").exists()
     assert not (root / "tests/frozen/verify/verify_old.py").exists()
     assert not (root / "checks/check_old.py").exists()
-    assert (root / "tests/frozen/test_bs.py").is_file()  # the new design's own test
+    assert (root / "tests/frozen/sanity/test_sanity_bs.py").is_file()  # the new design's own test
 
 
 def test_uncommitted_src_from_rejected_designs_is_reset(tmp_path: Path) -> None:
@@ -53,7 +53,7 @@ def test_uncommitted_src_from_rejected_designs_is_reset(tmp_path: Path) -> None:
     assert (root / "src/pkg/m2.py").read_text() == "def done(): return 2\n"
     assert not (root / "src/pkg/__init__.py").exists()
     assert not (root / "bench/bench_old.py").exists()
-    assert (root / "tests/frozen/test_bs.py").is_file()
+    assert (root / "tests/frozen/sanity/test_sanity_bs.py").is_file()
 
 
 def test_redesign_cannot_rewrite_committed_src(tmp_path: Path) -> None:

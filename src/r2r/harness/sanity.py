@@ -104,20 +104,27 @@ def check_sanity(
     reference_cases: Sequence[CaseOutcome] | None,
     pkgs: Iterable[str],
     *,
+    criteria: Sequence[str],
     required: bool = True,
 ) -> list[str]:
-    """Design-time problems with the milestone's sanity checks (lint, presence, speed)."""
-    if not spec.sanity_checks:
-        if spec.no_numerics_reason or not required:
-            return []
-        return [
-            "no sanity check: add at least one (an independent oracle from the equations), "
-            "or set no_numerics_reason if the milestone has no numerical output"
-        ]
+    """Design-time problems with the milestone's sanity checks: coverage of `criteria` (D87),
+    lint, presence and speed on the reference solution."""
+    problems = []
+    if required:
+        covered = {cid for c in spec.sanity_checks for cid in c.criterion_ids}
+        unknown = sorted(covered - set(criteria))
+        if unknown:
+            problems.append(f"sanity checks name unknown criteria: {', '.join(unknown)}")
+        for cid in criteria:
+            if cid not in covered and cid not in spec.unchecked_criteria:
+                problems.append(
+                    f"{cid} has no sanity check: add one (an independent oracle from "
+                    "the equations) or list it in unchecked_criteria with the reason "
+                    "if it has no numerical output"
+                )
     by_file: dict[str, float] = {}
     for c in spec.sanity_checks:
         by_file[c.file] = by_file.get(c.file, 0.0) + c.max_seconds
-    problems = []
     for rel, limit in by_file.items():
         path = root / rel
         if not path.is_file():

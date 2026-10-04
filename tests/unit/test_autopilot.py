@@ -94,6 +94,12 @@ def test_nothing_checked_when_criteria_cite_recorded_data_goes_to_the_owner() ->
     assert decide("result", facts(cites_data=True), CFG).action == "approve"  # verified
 
 
+def test_unchecked_criteria_go_to_the_owner() -> None:
+    """D87: criteria with no numerical check are judged by the owner, so no automatic approval."""
+    assert decide("result", facts(unchecked=["AC3"]), CFG) is None
+    assert decide("result", facts(unchecked=[]), CFG).action == "approve"
+
+
 def test_publication() -> None:
     assert decide("publication", facts(), CFG) is None
     assert (

@@ -126,3 +126,38 @@ def test_build_digest(tmp_path: Path) -> None:
     assert build_digest(spec, all_ok, ledger, test_files=None, **META).status == "met"
     none = [case("test_AC1__a", "failed", "x"), case("test_AC2__c", "failed", "x")]
     assert build_digest(spec, none, ledger, test_files=None, **META).status == "failed"
+
+
+def test_unchecked_criteria_are_the_owners_not_failures(tmp_path: Path) -> None:
+    """D87: criteria with no numerical output have no sanity check; the owner judges them."""
+    from samples import milestone_spec
+
+    from r2r.graph.render import render
+
+    spec = milestone_spec()
+    spec = spec.model_validate(
+        {
+            **spec.model_dump(),
+            "acceptance_criteria": [
+                Criterion(id="AC1", text="a").model_dump(),
+                Criterion(id="AC2", text="writes results/x.json").model_dump(),
+            ],
+        }
+    )
+    ledger = Ledger(tmp_path / "l.sqlite")
+    unchecked = {"AC2": "writes a JSON file; no numerical output"}
+    ok = [case("test_AC1__S1_a", "passed")]
+    d = build_digest(spec, ok, ledger, test_files=None, unchecked=unchecked, **META)
+    assert d.status == "met"  # every checked criterion passes
+    ac2 = {c.id: c for c in d.criteria}["AC2"]
+    assert not ac2.checked and "owner judges" in ac2.evidence
+    assert "AC2: not checked (you judge)" in render(d)
+    bad = [case("test_AC1__S1_a", "failed", "x")]
+    assert (
+        build_digest(spec, bad, ledger, test_files=None, unchecked=unchecked, **META).status
+        == "failed"
+    )
+    nothing = build_digest(
+        spec, [], ledger, test_files=None, unchecked={"AC1": "r", "AC2": "r"}, **META
+    )
+    assert nothing.status == "met" and not any(c.checked for c in nothing.criteria)

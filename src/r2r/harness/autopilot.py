@@ -29,6 +29,7 @@ class Facts:
     first_roadmap: bool = False
     design_feedback: str = ""
     cites_data: bool = False  # the milestone's criteria refer to the owner's recorded data
+    unchecked: list[str] = field(default_factory=list)  # criteria without a sanity check (D87)
 
 
 def decide(gate: str, f: Facts, cfg: AutopilotConfig) -> HumanDecision | None:
@@ -47,6 +48,8 @@ def decide(gate: str, f: Facts, cfg: AutopilotConfig) -> HumanDecision | None:
         return _redirect(f, cfg, [x for x in (f.design_feedback, *serious) if x])
     if gate == "result":
         ver = f.verification.status if f.verification is not None else "none"
+        if f.unchecked:
+            return None  # D87: criteria with no numerical check are the owner's to judge
         if f.cites_data and ver in ("none", "unchecked_only"):
             return None  # D84: nothing was compared with the owner's values; the owner decides
         if f.tests_passed and ver in VERIFIED_OK and not serious:

@@ -30,10 +30,16 @@ def build_digest(
     runtime_final_s: float | None = None,
     optimizer_attempts: int = 0,
     optimizer_stop: str | None = None,
+    unchecked: dict[str, str] | None = None,
 ) -> ResultDigest:
     mine = [c for c in cases if test_files is None or c.file in test_files]
+    unchecked = unchecked or {}
     criteria = []
     for crit in spec.acceptance_criteria:
+        if crit.id in unchecked:  # D87: no numerical output; not a failure, the owner's call
+            why = f"not checked, owner judges: {unchecked[crit.id]}"[:120]
+            criteria.append(CriterionResult(id=crit.id, passed=False, evidence=why, checked=False))
+            continue
         own = [c for c in mine if c.criterion_id == crit.id and c.outcome != "skipped"]
         ok = sum(c.outcome == "passed" for c in own)
         passed = bool(own) and ok == len(own)
@@ -41,14 +47,15 @@ def build_digest(
         criteria.append(CriterionResult(id=crit.id, passed=passed, evidence=evidence))
     n_pass = sum(c.outcome == "passed" for c in cases)
     n_fail = sum(c.outcome in ("failed", "error") for c in cases)
-    n_ok = sum(c.passed for c in criteria)
-    if n_ok == len(criteria) and n_fail == 0:
+    checked = [c for c in criteria if c.checked]
+    n_ok = sum(c.passed for c in checked)
+    if n_ok == len(checked) and n_fail == 0:
         status = "met"
     elif n_ok == 0:
         status = "failed"
     else:
         status = "partial"
-    failed_ids = [c.id for c in criteria if not c.passed]
+    failed_ids = [c.id for c in checked if not c.passed]
     deviations = ""
     if failed_ids:
         deviations = f"Criteria not met: {', '.join(failed_ids)}."

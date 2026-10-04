@@ -8,7 +8,7 @@ from samples import milestone_spec
 
 from r2r.agents.coder import CoderTools, run_coder_session
 from r2r.agents.math_designer import DesignError, write_design
-from r2r.contracts import BenchSpec, FileSpec, MathDesign, MathSpec
+from r2r.contracts import BenchSpec, FileSpec, MathDesign, MathSpec, SanityCheck
 from r2r.harness.frozen import freeze, verify
 from r2r.harness.sandbox import LocalProcessBackend
 from r2r.harness.workspace import Workspace
@@ -21,13 +21,18 @@ TEST_FILE = """\
 from sq.core import square
 
 
-def test_AC1__square_of_three():
-    assert square(3) == 9
+def oracle_square(x):
+    return x * x
 
 
-def test_AC1__square_of_negative():
-    assert square(-2) == 4
+def test_AC1__S1_square_of_three():
+    assert square(3) == oracle_square(3) == 9
+
+
+def test_AC1__S1_square_of_negative():
+    assert square(-2) == oracle_square(-2)
 """
+SANITY = "tests/frozen/sanity/test_sanity_m1.py"
 STUB = "def square(x: float) -> float:\n    raise NotImplementedError\n"
 IMPL = "def square(x: float) -> float:\n    return x * x\n"
 
@@ -38,17 +43,20 @@ def design() -> MathDesign:
         formulation="f(x) = x^2",
         algorithm="multiply",
         signatures=["square(x: float) -> float"],
-        test_files=["tests/frozen/test_m1_square.py"],
-        check_files=["checks/check_m1_square.py"],
+        test_files=[SANITY],
+        sanity_checks=[
+            SanityCheck(
+                id="S1",
+                criterion_ids=["AC1"],
+                kind="limit_case",
+                statement="square agrees with x*x",
+                file=SANITY,
+            )
+        ],
         bench=BenchSpec(entrypoint="bench/bench_main.py", problem_size="1e5 calls"),
     )
     files = [
-        FileSpec(path="tests/frozen/test_m1_square.py", purpose="test", content=TEST_FILE),
-        FileSpec(
-            path="checks/check_m1_square.py",
-            purpose="check",
-            content="import sympy\nx = sympy.Symbol('x')\nassert sympy.diff(x**2, x) == 2*x\n",
-        ),
+        FileSpec(path=SANITY, purpose="test", content=TEST_FILE),
         FileSpec(path="src/sq/__init__.py", purpose="stub", content=""),
         FileSpec(path="src/sq/core.py", purpose="stub", content=STUB),
         FileSpec(
@@ -85,7 +93,7 @@ def _call(tools: CoderTools, name: str, **args) -> str:
 
 def test_write_design_writes_files(ws: Workspace) -> None:
     written = write_design(ws, design(), previous=None)
-    assert "tests/frozen/test_m1_square.py" in written
+    assert SANITY in written
     assert (ws.root / "src/sq/core.py").read_text() == STUB
 
 
@@ -94,7 +102,7 @@ def test_design_cannot_overwrite_existing_src_or_frozen(ws: Workspace) -> None:
     freeze(ws)
     again = design()
     with pytest.raises(DesignError, match="frozen"):
-        write_design(ws, again, previous=None)  # tests/frozen/test_m1_square.py is frozen now
+        write_design(ws, again, previous=None)  # the sanity file is frozen now
 
 
 def test_redesign_replaces_previous_attempt(ws: Workspace) -> None:
@@ -118,11 +126,9 @@ def test_design_path_attack_refused(ws: Workspace) -> None:
 
 def test_list_and_read(tools: CoderTools) -> None:
     listing = _call(tools, "list_files", dir=".")
-    assert "src/sq/core.py" in listing and "tests/frozen/test_m1_square.py" in listing
+    assert "src/sq/core.py" in listing and SANITY in listing
     assert "NotImplementedError" in _call(tools, "read_file", path="src/sq/core.py")
-    assert "test_AC1__square_of_three" in _call(
-        tools, "read_file", path="tests/frozen/test_m1_square.py"
-    )
+    assert "test_AC1__S1_square_of_three" in _call(tools, "read_file", path=SANITY)
 
 
 def test_read_file_line_cap(tools: CoderTools) -> None:
@@ -157,7 +163,7 @@ def test_create_file_limits(tools: CoderTools) -> None:
 
 
 def test_frozen_writes_blocked_and_logged(tools: CoderTools, ws: Workspace) -> None:
-    out = _call(tools, "edit_file", path="tests/frozen/test_m1_square.py", old="== 9", new="== 0")
+    out = _call(tools, "edit_file", path=SANITY, old="== 9", new="== 0")
     assert out.startswith("error") and "read-only" in out
     out = _call(tools, "create_file", path="checks/check_evil.py", content="pass")
     assert out.startswith("error")

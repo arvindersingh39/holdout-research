@@ -142,7 +142,7 @@ def test_math_design_files_cover_spec() -> None:
     assert math_design().spec == math_spec()
     data = math_design().model_dump()
     data["files"] = []
-    with pytest.raises(ValidationError, match=re.escape("tests/frozen/test_bs.py")):
+    with pytest.raises(ValidationError, match=re.escape("tests/frozen/sanity/test_sanity_bs.py")):
         MathDesign.model_validate(data)
 
 

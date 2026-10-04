@@ -4,6 +4,7 @@ from pathlib import Path
 
 from graph_helpers import (
     BROKEN_TESTS,
+    GOOD_TESTS,
     IMPL,
     ROADMAP,
     SPEC,
@@ -53,7 +54,7 @@ def test_happy_path_tests_first_then_code(tmp_path: Path, fake: FakeLLM) -> None
     assert git.current_branch() == "main"  # passing work merged into main
     assert "coder session 1 (pass)" in git.run("log", "--format=%s", "-3")
     d = res.state["digest"]
-    assert d.status == "met" and d.criteria[0].evidence == "3/3 tests pass"  # incl. sanity
+    assert d.status == "met" and d.criteria[0].evidence == "2/2 tests pass"  # the sanity checks
     assert res.state["test_result"].passed and res.state["coder_sessions"] == 1
 
 
@@ -84,7 +85,14 @@ def test_tamper_attempt_via_tools_is_blocked_and_counted(tmp_path: Path, fake: F
     fake.script("math_designer", design(1))
     fake.script(
         "coder",
-        [tool_call("edit_file", path="tests/frozen/test_m1_square.py", old="== 9", new="== 0")],
+        [
+            tool_call(
+                "edit_file",
+                path="tests/frozen/sanity/test_sanity_m1.py",
+                old="== oracle_square(3)",
+                new="== 0",
+            )
+        ],
         *coder_pass(1),
     )
     ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
@@ -101,11 +109,13 @@ class TamperingBackend(LocalProcessBackend):
     done = False
 
     def run(self, cmd, timeout_s):
-        test_file = self.ws.root / "tests/frozen/test_m1_square.py"
+        test_file = self.ws.root / "tests/frozen/sanity/test_sanity_m1.py"
         if "pytest" in cmd and self.ws.frozen_manifest.exists() and not TamperingBackend.done:
             TamperingBackend.done = True
             test_file.chmod(0o644)
-            test_file.write_text(test_file.read_text().replace("== 9", "== 9 or True"))
+            test_file.write_text(
+                test_file.read_text().replace("== oracle_square(3)", "== oracle_square(3) or True")
+            )
         return super().run(cmd, timeout_s)
 
 
@@ -122,7 +132,7 @@ def test_tamper_on_disk_goes_to_gate_and_restore(tmp_path: Path, fake: FakeLLM) 
     ch = FakeChannel(decide("approve"), decide("approve"), decide("approve"), decide("stop"))
     deps, res = _run(tmp_path, fake, ch, sandbox_factory=TamperingBackend)
     assert ch.gates == ["roadmap", "tests", "tamper", "result"]
-    assert "changed: tests/frozen/test_m1_square.py" in ch.requests[2].markdown
+    assert "changed: tests/frozen/sanity/test_sanity_m1.py" in ch.requests[2].markdown
     verify(deps.workspace())  # restored from git
     assert res.state["digest"].status == "met"
 
@@ -172,11 +182,11 @@ def test_second_milestone_keeps_first_milestones_tests(tmp_path: Path, fake: Fak
     script_milestone(fake, 2)
     deps, res = _run(tmp_path, fake, FakeChannel(*PASS_ALL))
     root = deps.workspace().root
-    assert (root / "tests/frozen/test_m1_square.py").exists()
-    assert (root / "tests/frozen/test_m2_square.py").exists()
-    assert res.state["test_result"].n_passed == 6  # both milestones' tests (+ sanity) run
+    assert (root / "tests/frozen/sanity/test_sanity_m1.py").exists()
+    assert (root / "tests/frozen/sanity/test_sanity_m2.py").exists()
+    assert res.state["test_result"].n_passed == 4  # both milestones' sanity checks run
     existing = [r for r in fake.calls if r.role == "math_designer"][1]
-    assert "tests/frozen/test_m1_square.py" in str(existing.messages[1]["content"])
+    assert "tests/frozen/sanity/test_sanity_m1.py" in str(existing.messages[1]["content"])
 
 
 def test_unusable_design_is_a_failed_attempt_not_a_crash(tmp_path: Path, fake: FakeLLM) -> None:
@@ -201,20 +211,13 @@ def test_design_without_sanity_check_is_redesigned(tmp_path: Path, fake: FakeLLM
     _run(tmp_path, fake, ch)
     assert ch.gates == ["roadmap", "tests", "result"]
     second = [r for r in fake.calls if r.role == "math_designer"][1]
-    assert "Sanity check: no sanity check" in str(second.messages[1]["content"])
+    assert "AC1 has no sanity check" in str(second.messages[1]["content"])
 
 
 def test_oracle_that_calls_the_package_is_redesigned(tmp_path: Path, fake: FakeLLM) -> None:
-    from graph_helpers import SANITY
-
-    cheat = SANITY.replace("return x * x", "return square(x)")
-    bad = design(1)
-    files = [
-        f.model_copy(update={"content": cheat.format(pkg="sq1")}) if "sanity" in f.path else f
-        for f in bad.files
-    ]
+    cheat = GOOD_TESTS.replace("return x * x", "return square(x)")
     _start(fake)
-    fake.script("math_designer", bad.model_copy(update={"files": files}), design(1))
+    fake.script("math_designer", design(1, cheat), design(1))
     fake.script("coder", *coder_pass(1))
     ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
     _run(tmp_path, fake, ch)

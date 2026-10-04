@@ -180,7 +180,9 @@ def _inputs(
     results = [
         f"{m.milestone.id} {m.milestone.title}: status {m.digest.status}; "
         + "; ".join(
-            f"{c.id} {'passed' if c.passed else 'FAILED'} ({c.evidence})" for c in m.digest.criteria
+            f"{c.id} {('passed' if c.passed else 'FAILED') if c.checked else 'not checked'} "
+            f"({c.evidence})"
+            for c in m.digest.criteria
         )
         + f"; metrics {m.digest.metrics}; deviations: {m.digest.deviations or 'none'}"
         for m in ms

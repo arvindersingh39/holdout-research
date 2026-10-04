@@ -128,32 +128,43 @@ def make_deps(
 
 STUB = "def square(x: float) -> float:\n    raise NotImplementedError\n"
 IMPL = "def square(x: float) -> float:\n    return x * x\n"
+# D87: sanity checks are the only tests: an oracle from the formula next to the package call
 GOOD_TESTS = """\
 from {pkg}.core import square
-
-
-def test_AC1__square_of_three():
-    assert square(3) == 9
-
-
-def test_AC1__square_of_negative():
-    assert square(-2) == 4
-"""
-VACUOUS_TESTS = "def test_AC1__always_true():\n    assert True\n"
-BROKEN_TESTS = (
-    "from no_such_package import square\n\n\ndef test_AC1__x():\n    assert square(3) == 9\n"
-)
-
-
-SANITY = """from {pkg}.core import square
 
 
 def oracle_square(x):
     return x * x
 
 
-def test_AC1__S1_square_matches_formula():
-    assert square(3.0) == oracle_square(3.0)
+def test_AC1__square_of_three():
+    assert square(3) == oracle_square(3)
+
+
+def test_AC1__square_of_negative():
+    assert square(-2) == oracle_square(-2)
+"""
+VACUOUS_TESTS = """\
+from {pkg}.core import square
+
+
+def oracle_one():
+    return 1
+
+
+def test_AC1__always_true():
+    assert oracle_one() == 1 or square
+"""
+BROKEN_TESTS = """\
+from no_such_package import square
+
+
+def oracle_square(x):
+    return x * x
+
+
+def test_AC1__x():
+    assert square(3) == oracle_square(3)
 """
 
 
@@ -163,30 +174,26 @@ def design(
     bench: bool = False,
     reference: str = IMPL,
     extra: tuple[FileSpec, ...] = (),
-    sanity: bool | None = None,
+    sanity: bool = True,
 ) -> MathDesign:
-    """`bench=False` (default) skips the optimizer loop for that milestone. A sanity check (D83)
-    is included with the good tests only, so a deliberately broken design stays broken."""
-    sanity = tests == GOOD_TESTS if sanity is None else sanity
+    """`bench=False` (default) skips the simplifier for that milestone. `sanity=False` leaves
+    AC1 without a sanity check (and without tests), which the harness rejects (D87)."""
     pkg = f"sq{n}"
     meta = {"created_by": "math_designer", "run_id": "g", "milestone_id": f"M{n}"}
-    test_file = f"tests/frozen/test_m{n}_square.py"
-    check_file = f"checks/check_m{n}_square.py"
-    sanity_file = f"tests/frozen/sanity/test_sanity_m{n}.py"
+    test_file = sanity_file(n)
     spec = MathSpec(
         **meta,
         formulation="f(x) = x^2",
         algorithm="multiply",
         signatures=["square(x: float) -> float"],
-        test_files=[test_file, sanity_file] if sanity else [test_file],
-        check_files=[check_file],
+        test_files=[test_file] if sanity else [],
         sanity_checks=[
             SanityCheck(
                 id="S1",
                 criterion_ids=["AC1"],
                 kind="limit_case",
                 statement="square agrees with x*x written from the formula",
-                file=sanity_file,
+                file=test_file,
             )
         ]
         if sanity
@@ -196,10 +203,8 @@ def design(
         else None,
     )
     files = [
-        FileSpec(path=test_file, purpose="test", content=tests.format(pkg=pkg)),
-        FileSpec(path=check_file, purpose="check", content="assert (2 + 3) ** 2 == 25\n"),
         *(
-            [FileSpec(path=sanity_file, purpose="test", content=SANITY.format(pkg=pkg))]
+            [FileSpec(path=test_file, purpose="test", content=tests.format(pkg=pkg))]
             if sanity
             else []
         ),
@@ -218,6 +223,10 @@ def design(
             )
         )
     return MathDesign(**meta, spec=spec, files=files)
+
+
+def sanity_file(n: int) -> str:
+    return f"tests/frozen/sanity/test_sanity_m{n}.py"
 
 
 def coder_pass(n: int) -> list[list[ToolCall]]:

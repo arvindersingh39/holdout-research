@@ -82,7 +82,9 @@ def restore(ws: Workspace, git, commit: str) -> None:
         p = ws.root / rel
         if p.exists():
             p.chmod(0o644)
-    git.run("checkout", commit, "--", *FROZEN_DIRS)
+    tracked = [d for d in FROZEN_DIRS if git.run("ls-tree", "--name-only", commit, "--", d).strip()]
+    if tracked:  # runs since D87 have no checks/ at all
+        git.run("checkout", commit, "--", *tracked)
     for rel in expected:
         p = ws.root / rel
         p.chmod(p.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))

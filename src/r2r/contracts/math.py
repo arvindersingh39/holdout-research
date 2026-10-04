@@ -14,7 +14,7 @@ SanityKind = Literal[
     "initial_condition",  # the solution at t=0 or on the boundary equals the input
     "independent_solver",  # the same equations solved generically agree
     "limit_case",  # special or limiting inputs with known answers
-    "conservation",  # sums, ranges, budgets, probabilities
+    "conservation",  # preserved totals, domains and constraints of the outputs
     "convergence_order",  # refining the step changes the result as the method's order predicts
     "optimizer_claim",  # the optimum beats its starting points; the iterations ran
     "statistical",  # Monte Carlo within k standard errors of an independent value
@@ -45,12 +45,13 @@ class MathSpec(Contract):
     algorithm: Text(3000, 1)
     signatures: Annotated[list[Text(400, 1)], Field(min_length=1, max_length=20)]
     tolerances: dict[Text(120, 1), float] = {}  # names may be reference-data paths (D82)
-    test_files: Annotated[list[WorkspacePath], Field(min_length=1, max_length=20)]
-    check_files: Annotated[list[WorkspacePath], Field(max_length=20)] = []
+    test_files: Annotated[list[WorkspacePath], Field(max_length=20)]  # sanity files (D87)
+    check_files: Annotated[list[WorkspacePath], Field(max_length=20)] = []  # pre-D87 runs only
     bench: BenchSpec | None = None
     figure_scripts: Annotated[list[WorkspacePath], Field(max_length=10)] = []
     sanity_checks: Annotated[list[SanityCheck], Field(max_length=12)] = []
-    no_numerics_reason: Text(300) | None = None  # why a milestone has no sanity check
+    # D87: criteria with no numerical output, and why; the owner judges them at the result gate
+    unchecked_criteria: dict[CriterionId, Text(200, 1)] = {}
 
 
 class MathDesign(Contract):
@@ -70,10 +71,27 @@ class MathDesign(Contract):
         missing = [p for p in named if p not in written]
         if missing:
             raise ValueError(f"files missing for paths named in spec: {missing}")
+        if self.spec.check_files or any(f.purpose == "check" for f in self.files):
+            raise ValueError(
+                "SymPy checks are no longer used (D87): check the maths numerically "
+                "in sanity checks"
+            )
+        unit = [p for p in self.spec.test_files if not _is_sanity_file(p)]
+        if unit:
+            raise ValueError(
+                f"only sanity checks are tests (D87), in {SANITY_DIR}/test_sanity_*.py; not: {unit}"
+            )
         for c in self.spec.sanity_checks:
-            name = c.file.rsplit("/", 1)[-1]
-            if not (c.file.startswith(SANITY_DIR + "/") and name.startswith("test_sanity_")):
+            if not _is_sanity_file(c.file):
                 raise ValueError(f"{c.id}: sanity files live in {SANITY_DIR}/test_sanity_*.py")
             if c.file not in self.spec.test_files:
                 raise ValueError(f"{c.id}: {c.file} must also be listed in test_files")
+        used = {c.file for c in self.spec.sanity_checks}
+        unused = [p for p in self.spec.test_files if p not in used]
+        if unused:
+            raise ValueError(f"no sanity check names these files: {unused}")
         return self
+
+
+def _is_sanity_file(path: str) -> bool:
+    return path.startswith(SANITY_DIR + "/") and path.rsplit("/", 1)[-1].startswith("test_sanity_")

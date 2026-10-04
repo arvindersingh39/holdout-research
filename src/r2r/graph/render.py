@@ -85,9 +85,7 @@ def _(v: CoordinatorVerdict) -> str:
 
 @render.register
 def _(d: ResultDigest) -> str:
-    crit = "\n".join(
-        f"- {c.id}: {'pass' if c.passed else 'FAIL'} · {c.evidence}" for c in d.criteria
-    )
+    crit = "\n".join(f"- {c.id}: {_verdict(c)} · {c.evidence}" for c in d.criteria)
     metrics = "\n".join(f"- {k}: {v:g}" for k, v in d.metrics.items()) or "- (none)"
     return "\n\n".join(
         [
@@ -148,6 +146,12 @@ def render_files(root, paths: list[str]) -> str:
         parts.append(block)
         total += len(block)
     return "\n\n".join(parts)
+
+
+def _verdict(c) -> str:
+    if not c.checked:
+        return "not checked (you judge)"
+    return "pass" if c.passed else "FAIL"
 
 
 def render_attempts(patches: list, outcomes: list) -> str:

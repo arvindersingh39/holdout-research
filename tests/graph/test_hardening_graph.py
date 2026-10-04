@@ -28,9 +28,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "unit"))
 from test_scout import KEY, FakeTavily
 
 PAGE_QUOTE = "the Black-Scholes call price is 10.4506"
-WRONG_TESTS = (
-    "from {pkg}.core import square\n\n\ndef test_AC1__wrong():\n    assert square(3) == 10\n"
-)
+WRONG_TESTS = GOOD_TESTS.replace("return x * x", "return x * x + 1")  # a wrong oracle
 
 SLOW_REF = (
     "import time\n\n\ndef square(x: float) -> float:\n    time.sleep(0.5)\n    return x * x\n"
@@ -42,7 +40,7 @@ PERF_TESTS = (
 def test_AC1__perf_fast_square():
     import time
     t0 = time.perf_counter()
-    square(2.0)
+    assert square(2.0) == oracle_square(2.0)
     assert time.perf_counter() - t0 < 0.2
 """
 )
@@ -124,7 +122,7 @@ def test_dispute_approved_revision_then_code_passes(tmp_path: Path, fake: FakeLL
         [
             tool_call(
                 "dispute_test",
-                test_id="tests.frozen.test_m1_square::test_AC1__square_of_three",
+                test_id="tests.frozen.sanity.test_sanity_m1::test_AC1__square_of_three",
                 reason="I believe 9 is wrong",
                 evidence="3*3",
             )
@@ -153,7 +151,7 @@ def test_dispute_revision_failing_on_reference_goes_to_coder_gate(
         [
             tool_call(
                 "dispute_test",
-                test_id="tests.frozen.test_m1_square::test_AC1__square_of_three",
+                test_id="tests.frozen.sanity.test_sanity_m1::test_AC1__square_of_three",
                 reason="r",
                 evidence="e",
             )
@@ -189,7 +187,7 @@ def test_perf_test_missed_by_reference_reaches_tests_gate_and_coder_meets_it(
     tmp_path: Path, fake: FakeLLM
 ) -> None:
     _start(fake)
-    fake.script("math_designer", design(1, PERF_TESTS, reference=SLOW_REF, sanity=True))
+    fake.script("math_designer", design(1, PERF_TESTS, reference=SLOW_REF))
     fake.script("coder", *coder_pass(1))
     ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
     _, res = _run(tmp_path, fake, ch)
