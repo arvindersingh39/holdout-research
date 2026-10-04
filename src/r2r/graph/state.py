@@ -56,7 +56,8 @@ class PipelineState(TypedDict, total=False):
     opt_runtime_s: float | None  # current best
     opt_sloc: int
     opt_bench_hash: str | None
-    opt_profile: ProfileReport | None
+    opt_profile: ProfileReport | None  # unused since D85; kept for old checkpoints
+    opt_complexity: int | None  # D85: statements + calls under src/
     opt_stop_reason: str | None
     digest: ResultDigest | None
     human_decision: HumanDecision | None

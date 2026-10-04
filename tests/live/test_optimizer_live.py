@@ -1,7 +1,9 @@
-"""Live optimizer smoke test (Gemini Flash + Docker). Run only with R2R_LIVE=1 after approval.
+"""Live simplifier smoke test (D85; Gemini Flash + Docker). Run only with R2R_LIVE=1 after
+approval.
 
-(a) slow_project: at least one speedup must be accepted.  (b) the owner's pilot run, M1: the loop
-must stop by rule with a logged reason. Estimated cost $0.02-0.05.
+(a) slow_project: at least one simplification must be accepted (the loop is a closed form).
+(b) the owner's pilot run, M1: the loop must stop by rule with a logged reason.
+Estimated cost $0.02-0.05.
 """
 
 import shutil
@@ -16,9 +18,7 @@ from r2r.graph.deps import RunDeps
 from r2r.graph.driver import config, open_graph
 from r2r.harness.frozen import freeze
 from r2r.harness.gitops import Git
-from r2r.harness.hotspots import hotspot_source
-from r2r.harness.optimize import Baseline, baseline, try_patch
-from r2r.harness.profile import run_profile
+from r2r.harness.optimize import Baseline, baseline, source_listing, try_patch
 from r2r.harness.sandbox import DockerBackend
 from r2r.harness.stoprule import decide
 from r2r.harness.workspace import Workspace
@@ -39,18 +39,17 @@ def optimize_until_stop(ws, box, ms: MathSpec, ctx: CallContext) -> tuple[list, 
     cfg = ctx.settings.budgets
     entry = ms.bench.entrypoint
     b = baseline(ws, box, entry, cfg, run_id=ctx.run_id, milestone_id=ctx.milestone_id)
-    console.print(f"baseline {b.runtime_s:.4g} s (cv {b.cv:.1%}), sloc {b.sloc}")
+    console.print(f"baseline {b.runtime_s:.4g} s, sloc {b.sloc}, complexity {b.complexity}")
     current = b
     outcomes: list[OptimizationOutcome] = []
     patches: list[OptimizationPatch | None] = []
-    action, reason = decide([], cfg, ms.bench.target_runtime_s, b.runtime_s)
+    action, reason = decide([], cfg)
     while action == "continue":
         try:
             patch = run_optimizer(
-                current.profile,
-                hotspot_source(ws, current.profile),
+                source_listing(ws),
+                current.complexity,
                 current.runtime_s,
-                ms.bench.target_runtime_s,
                 ms,
                 notes(patches, outcomes),
                 ctx,
@@ -65,11 +64,12 @@ def optimize_until_stop(ws, box, ms: MathSpec, ctx: CallContext) -> tuple[list, 
                 reason=f"rejected: no valid patch ({str(e)[:150]})",
                 runtime_before_s=current.runtime_s,
                 sloc_before=current.sloc,
+                complexity_before=current.complexity,
             )
             console.print(f"#{out.attempt} no valid patch → {out.reason}")
             outcomes.append(out)
             patches.append(None)
-            action, reason = decide(outcomes, cfg, ms.bench.target_runtime_s, b.runtime_s)
+            action, reason = decide(outcomes, cfg)
             continue
         out = try_patch(
             ws,
@@ -85,23 +85,17 @@ def optimize_until_stop(ws, box, ms: MathSpec, ctx: CallContext) -> tuple[list, 
         )
         console.print(f"#{out.attempt} {patch.technique}: {patch.rationale}\n   → {out.reason}")
         if out.accepted:
-            prof = run_profile(
-                ws,
-                box,
-                entry,
-                cfg.sandbox.bench_timeout_s,
-                run_id=ctx.run_id,
-                milestone_id=ctx.milestone_id,
+            current = Baseline(
+                out.runtime_after_s, 0.0, out.sloc_after, b.bench_hash, out.complexity_after
             )
-            current = Baseline(out.runtime_after_s, 0.0, out.sloc_after, b.bench_hash, prof)
         outcomes.append(out)
         patches.append(patch)
-        action, reason = decide(outcomes, cfg, ms.bench.target_runtime_s, b.runtime_s)
+        action, reason = decide(outcomes, cfg)
     console.print(f"STOP: {reason}")
     return outcomes, reason
 
 
-def test_slow_project_speedup_accepted(tmp_path: Path) -> None:
+def test_slow_project_simplification_accepted(tmp_path: Path) -> None:
     settings = load_settings(REPO / "config", REPO / ".env")
     ws = Workspace.create(run_paths("live-opt", base=tmp_path, create=True))
     for sub in ("src", "bench", "tests/frozen", "checks"):

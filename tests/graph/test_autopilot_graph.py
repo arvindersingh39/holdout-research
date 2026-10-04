@@ -147,7 +147,6 @@ def test_serious_test_flag_triggers_an_automatic_redirect(tmp_path: Path, fake: 
     fake.script(
         "overseer",
         rep("plan"),
-        rep("spec"),
         rep("tests", (serious,)),
         rep("tests"),
         rep("result", (late,)),

@@ -33,7 +33,19 @@ class OptimizationPatch(Contract):
     milestone_scoped = True
 
     diff: Lines(300, 30_000)  # unified diff
-    technique: Literal["vectorize", "algorithmic", "numba", "caching", "io", "trim", "other"]
+    technique: Literal[
+        "dead_code",
+        "inline",
+        "dedupe",
+        "simplify",  # D85: the simplifier's techniques
+        "vectorize",
+        "algorithmic",
+        "numba",
+        "caching",
+        "io",
+        "trim",
+        "other",
+    ]
     rationale: Text(200, 1)
 
 
@@ -47,3 +59,5 @@ class OptimizationOutcome(Contract):
     runtime_after_s: NonNegativeFloat | None = None
     sloc_before: NonNegativeInt
     sloc_after: NonNegativeInt | None = None
+    complexity_before: NonNegativeInt | None = None  # D85: statements + calls under src/
+    complexity_after: NonNegativeInt | None = None

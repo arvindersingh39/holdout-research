@@ -5,11 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from r2r.contracts import Hotspot, OptimizationPatch, ProfileReport
+from r2r.contracts import OptimizationPatch
 from r2r.harness.frozen import freeze
 from r2r.harness.gitops import Git
-from r2r.harness.hotspots import hotspot_source
-from r2r.harness.optimize import Baseline, baseline, try_patch
+from r2r.harness.optimize import Baseline, baseline, source_listing, try_patch
 from r2r.harness.sandbox import LocalProcessBackend
 from r2r.harness.workspace import Workspace
 from r2r.settings import load_settings
@@ -77,17 +76,18 @@ def _try(ws, box, base, patch, attempt=1):
 
 def test_baseline(base: Baseline) -> None:
     assert base.runtime_s > 0 and base.sloc > 5 and len(base.bench_hash) == 64
-    assert "slow_sum" in {h.qualname for h in base.profile.hotspots}
+    assert base.complexity > 5  # statements + calls under src/ (D85)
 
 
-def test_real_speedup_is_kept(ws: Workspace, box: LocalProcessBackend, base: Baseline) -> None:
-    out = _try(ws, box, base, _patch(SPEEDUP))
+def test_simpler_patch_is_kept(ws: Workspace, box: LocalProcessBackend, base: Baseline) -> None:
+    out = _try(ws, box, base, _patch(SPEEDUP, technique="simplify"))
     assert out.accepted, out.reason
-    assert out.runtime_after_s < base.runtime_s * 0.5
+    assert "simpler" in out.reason
+    assert out.complexity_after < out.complexity_before == base.complexity
     git = Git(ws)
     assert git.current_branch() == "main"
     assert "for i in range" not in (ws.root / "src/slowpkg/core.py").read_text()
-    assert "optimizer attempt 1" in git.run("log", "--format=%s", "-1")
+    assert "simplifier attempt 1" in git.run("log", "--format=%s", "-1")
 
 
 def test_behaviour_change_is_reverted(
@@ -132,34 +132,13 @@ def test_trial_branches_are_cleaned_up(
     assert Git(ws).run("branch", "--list", "opt/*").strip() == ""
 
 
-# --- hotspot source -------------------------------------------------------------------------
+# --- source listing for the simplifier -----------------------------------------------------
 
 
-def _report(*spots: tuple[str, str, int, int]) -> ProfileReport:
-    return ProfileReport(
-        created_by="harness",
-        total_s=1.0,
-        hotspots=[
-            Hotspot(qualname=q, file=f, line_start=a, line_end=b, cum_s=0.5, pct=50.0)
-            for q, f, a, b in spots
-        ],
-        **META,
-    )
-
-
-def test_hotspot_source(ws: Workspace) -> None:
-    rep = _report(
-        ("compute", "src/slowpkg/core.py", 15, 16), ("slow_sum", "src/slowpkg/core.py", 4, 8)
-    )
-    src = hotspot_source(ws, rep)
-    assert "# src/slowpkg/core.py lines 15-16 (compute)" in src
-    assert "for i in range(n):" in src and "def compute" in src
-
-
-def test_hotspot_source_dedups_and_caps(ws: Workspace) -> None:
-    rep = _report(("slow_sum", "src/slowpkg/core.py", 4, 8), ("inner", "src/slowpkg/core.py", 5, 7))
-    assert hotspot_source(ws, rep).count("total = 0") == 1  # nested range not repeated
-    big = ws.root / "src/slowpkg/big.py"
-    big.write_text("\n".join(f"x{i} = {i}" for i in range(500)))
-    capped = hotspot_source(ws, _report(("big", "src/slowpkg/big.py", 1, 500)), max_lines=300)
-    assert "x299 = 299" in capped and "x300 = 300" not in capped and "truncated" in capped
+def test_source_listing_largest_first_and_capped(ws: Workspace) -> None:
+    (ws.root / "src/slowpkg/tiny.py").write_text("X = 1\n")
+    text = source_listing(ws)
+    assert text.index("src/slowpkg/core.py") < text.index("src/slowpkg/tiny.py")
+    assert "def slow_sum" in text
+    capped = source_listing(ws, max_chars=200)
+    assert len(capped) <= 400 and "omitted" in capped

@@ -62,7 +62,6 @@ def test_hooks_briefings_and_flags_through_one_milestone(tmp_path: Path, fake: F
     fake.script(
         "overseer",
         rep("plan", flags=[FLAG]),
-        rep("spec"),
         rep("design", [brief("math_designer", "Each test must call the stub; no assert True.")]),
         rep("result", [brief("short_planner", "Next spec: state tolerances explicitly.")]),
     )
@@ -72,7 +71,7 @@ def test_hooks_briefings_and_flags_through_one_milestone(tmp_path: Path, fake: F
     assert [
         json.loads(r.messages[1]["content"].split("<data>")[1].split("</data>")[0])["point"]
         for r in _calls(fake, "overseer")
-    ] == ["plan", "spec", "design", "result"]
+    ] == ["plan", "design", "result"]  # no spec hook (D86)
     assert "Overseer" in ch.requests[0].markdown and FLAG["text"] in ch.requests[0].markdown
     first, second = _calls(fake, "math_designer")
     assert len(_system(first)) == 1
@@ -92,7 +91,6 @@ def test_failed_coder_session_gets_a_briefing(tmp_path: Path, fake: FakeLLM) -> 
     fake.script(
         "overseer",
         rep("plan"),
-        rep("spec"),
         rep("code", [brief("coder", "square(x) is x*x; edit src/sq1/core.py.")]),
         rep("result"),
     )
@@ -111,12 +109,10 @@ def test_planner_briefing_carries_to_next_milestone_others_cleared(
     fake.script(
         "overseer",
         rep("plan"),
-        rep("spec"),
         rep(
             "result",
             [brief("short_planner", "CARRY-ME"), brief("math_designer", "M1-ONLY")],
         ),
-        rep("spec"),
         rep("result"),
     )
     ch = FakeChannel(decide("approve"), decide("approve"), decide("approve"), decide("stop"))
@@ -180,7 +176,6 @@ def test_design_gate_gets_the_overseers_read(tmp_path: Path, fake: FakeLLM) -> N
     fake.script(
         "overseer",
         rep("plan"),
-        rep("spec"),
         rep("design"),
         rep("design_gate", flags=[gate_flag]),
     )
@@ -191,7 +186,7 @@ def test_design_gate_gets_the_overseers_read(tmp_path: Path, fake: FakeLLM) -> N
         json.loads(r.messages[1]["content"].split("<data>")[1].split("</data>")[0])["point"]
         for r in _calls(fake, "overseer")
     ]
-    assert points == ["plan", "spec", "design", "design_gate"]
+    assert points == ["plan", "design", "design_gate"]
     assert gate_flag["text"] in ch.requests[-1].markdown
 
 
@@ -205,14 +200,12 @@ def test_redirect_clears_stale_overseer_advice(tmp_path: Path, fake: FakeLLM) ->
     fake.script(
         "overseer",
         rep("plan"),
-        rep("spec"),
         rep(
             "design",
             [brief("math_designer", "STALE-ADVICE: write stub-injection audits")],
             [stale_flag],
         ),
         rep("design_gate"),
-        rep("spec"),
     )
     ch = FakeChannel(decide("approve"), decide("redirect", note="Simplify M1."), decide("stop"))
     _run(tmp_path, fake, ch)

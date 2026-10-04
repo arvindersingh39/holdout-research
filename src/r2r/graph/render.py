@@ -151,15 +151,16 @@ def render_files(root, paths: list[str]) -> str:
 
 
 def render_attempts(patches: list, outcomes: list) -> str:
-    """Optimizer attempts for the result gate: technique, runtime change, kept or not, why."""
+    """Simplifier attempts (D85) for the result gate: technique, complexity, kept or not, why."""
     if not outcomes:
         return ""
-    lines = ["**Optimizer attempts**"]
+    lines = ["**Simplifier attempts**"]
     for patch, o in zip(patches, outcomes, strict=True):
-        after = f"{o.runtime_after_s:.4g} s" if o.runtime_after_s is not None else "-"
         tech = patch.technique if patch else "none"
         mark = "kept" if o.accepted else "reverted"
-        lines.append(
-            f"- #{o.attempt} {tech}: {o.runtime_before_s:.4g} s → {after}, {mark}: {o.reason}"
-        )
+        cx = ""
+        if o.complexity_before is not None:
+            after = o.complexity_after if o.complexity_after is not None else "-"
+            cx = f"complexity {o.complexity_before} → {after}, "
+        lines.append(f"- #{o.attempt} {tech}: {cx}{mark}: {o.reason}")
     return "\n".join(lines)

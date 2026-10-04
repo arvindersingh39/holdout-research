@@ -52,9 +52,7 @@ from r2r.harness.bench import BenchFailed
 from r2r.harness.checks import run_checks
 from r2r.harness.frozen import FrozenTamper, freeze, restore
 from r2r.harness.gitops import Git
-from r2r.harness.hotspots import hotspot_source
-from r2r.harness.optimize import Baseline, baseline, try_patch
-from r2r.harness.profile import run_profile
+from r2r.harness.optimize import Baseline, baseline, source_listing, try_patch
 from r2r.harness.redgreen import assess
 from r2r.harness.refdata import DATA_DIR
 from r2r.harness.refdata import describe as describe_data
@@ -441,15 +439,8 @@ def render_verification(rep: VerificationReport | None) -> str:
     return "\n".join(lines)
 
 
-def _target(state: PipelineState, deps: RunDeps) -> float | None:
-    bench = state["math_spec"].bench
-    if bench is not None and bench.target_runtime_s is not None:
-        return bench.target_runtime_s
-    return deps.settings.budgets.optimizer_target_runtime_s
-
-
 def opt_baseline(state: PipelineState, deps: RunDeps) -> Update:
-    """Measure the passing code before optimising: bench, lines of code, profile, bench hash."""
+    """Measure the passing code before simplifying: bench, lines of code, complexity, bench hash."""
     ms = state["math_spec"]
     reset: Update = {"opt_outcomes": [], "opt_patches": [], "opt_stop_reason": None}
     if ms.bench is None:
@@ -466,19 +457,19 @@ def opt_baseline(state: PipelineState, deps: RunDeps) -> Update:
         )
     except BenchFailed as e:  # e.g. a timeout: the tests passed, so skip optimising, keep going
         return reset | {"opt_stop_reason": f"benchmark failed: {e}", "opt_baseline_s": None}
-    action, reason = decide([], deps.settings.budgets, _target(state, deps), b.runtime_s)
+    action, reason = decide([], deps.settings.budgets)
     return reset | {
         "opt_baseline_s": b.runtime_s,
         "opt_runtime_s": b.runtime_s,
         "opt_sloc": b.sloc,
         "opt_bench_hash": b.bench_hash,
-        "opt_profile": b.profile,
+        "opt_complexity": b.complexity,
         "opt_stop_reason": reason if action == "stop" else None,
     }
 
 
 def optimize(state: PipelineState, deps: RunDeps) -> Update:
-    """One optimizer attempt: #6 proposes, the harness keeps or reverts, the stop rule decides."""
+    """One simplifier attempt (D85): #6 proposes, the harness keeps or reverts, the rule decides."""
     m = _milestone(state)
     ms = state["math_spec"]
     cfg = deps.settings.budgets
@@ -491,15 +482,13 @@ def optimize(state: PipelineState, deps: RunDeps) -> Update:
         0.0,
         state["opt_sloc"],
         state["opt_bench_hash"],
-        state["opt_profile"],
+        state["opt_complexity"],
     )
-    target = _target(state, deps)
     try:
         patch = run_optimizer(
-            current.profile,
-            hotspot_source(ws, current.profile),
+            source_listing(ws),
+            current.complexity,
             current.runtime_s,
-            target,
             ms,
             notes(patches, outcomes),
             deps.ctx(m.id, _briefing(state, "optimizer")),
@@ -517,6 +506,7 @@ def optimize(state: PipelineState, deps: RunDeps) -> Update:
             reason=f"rejected: no valid patch ({str(e)[:200]})",
             runtime_before_s=current.runtime_s,
             sloc_before=current.sloc,
+            complexity_before=current.complexity,
         )
     else:
         try:
@@ -536,22 +526,14 @@ def optimize(state: PipelineState, deps: RunDeps) -> Update:
             return {"tamper": str(e)}
     update: Update = {}
     if outcome.accepted:
-        profile = run_profile(
-            ws,
-            box,
-            ms.bench.entrypoint,
-            cfg.sandbox.bench_timeout_s,
-            run_id=deps.run_id,
-            milestone_id=m.id,
-        )
         update |= {
             "opt_runtime_s": outcome.runtime_after_s,
             "opt_sloc": outcome.sloc_after,
-            "opt_profile": profile,
+            "opt_complexity": outcome.complexity_after,
         }
     outcomes.append(outcome)
     patches.append(patch)
-    action, reason = decide(outcomes, cfg, target, state["opt_baseline_s"])
+    action, reason = decide(outcomes, cfg)
     return update | {
         "opt_outcomes": outcomes,
         "opt_patches": patches,

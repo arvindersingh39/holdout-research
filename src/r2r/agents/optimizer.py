@@ -1,4 +1,5 @@
-"""#6 Optimizer: proposes OptimizationPatches from a ProfileReport (Phase 6).
+"""#6 Optimizer, now a simplifier (D85): proposes patches that make the code simpler with the
+same maths.
 
 It only proposes. Whether a patch is kept, reverted, or the loop stops is decided by the
 harness (`harness.optimize.try_patch`, `harness.stoprule`), never by the model.
@@ -8,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from r2r.contracts import MathSpec, OptimizationOutcome, OptimizationPatch, ProfileReport
+from r2r.contracts import MathSpec, OptimizationOutcome, OptimizationPatch
 from r2r.llm.gateway import CallContext, call_structured
 
 ROLE = "optimizer"
@@ -23,10 +24,9 @@ class AttemptNote(BaseModel):
 
 
 class OptimizerInput(BaseModel):
-    profile: ProfileReport
-    hotspot_source: str
+    source: str  # the package's files, largest first, inside <document> tags
+    complexity: int  # statements + calls under src/ (lower is simpler)
     runtime_s: float
-    target_runtime_s: float | None
     signatures: list[str]
     tolerances: dict[str, float]
     previous_attempts: list[AttemptNote]
@@ -50,19 +50,17 @@ def notes(
 
 
 def run_optimizer(
-    profile: ProfileReport,
     source: str,
+    complexity: int,
     runtime_s: float,
-    target_s: float | None,
     math_spec: MathSpec,
     previous: list[AttemptNote],
     ctx: CallContext,
 ) -> OptimizationPatch:
     payload = OptimizerInput(
-        profile=profile,
-        hotspot_source=source,
+        source=source,
+        complexity=complexity,
         runtime_s=runtime_s,
-        target_runtime_s=target_s,
         signatures=math_spec.signatures,
         tolerances=math_spec.tolerances,
         previous_attempts=previous,

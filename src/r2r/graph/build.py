@@ -59,7 +59,6 @@ GUARDED = (
     "digest",
     "publish",
     "oversee_plan",
-    "oversee_spec",
     "oversee_design",
     "oversee_design_gate",
     "oversee_tests",
@@ -70,7 +69,6 @@ GUARDED = (
 # Phase 7c: where Python routes through the overseer, and where each hook continues.
 HOOKS = {
     "roadmap_gate": "oversee_plan",
-    "scout": "oversee_spec",
     "design": "oversee_design",
     "design_gate": "oversee_design_gate",  # the owner decides after two failed designs
     "tests_gate": "oversee_tests",  # autopilot only: someone must read the tests (D76)
@@ -109,7 +107,6 @@ def _via_overseer(
     Only the hook's own edge returns to the original target: the overseer never routes."""
     hooked = {
         "long_plan": {"roadmap_gate"},
-        "coordinate": {"scout"},
         "design": {"design", "design_gate", *({"tests_gate"} if autopilot else set())},
         "code": {"code"},
         "digest": {"result_gate"},
@@ -124,12 +121,17 @@ def _via_overseer(
 
 
 def _via_verify(route: Callable[[PipelineState], str], enabled: bool) -> Callable:
-    """Phase 7d: passing code is verified before optimising, and again before the digest."""
-    to = {"opt_baseline": "verify_code", "digest": "verify_final"}
+    """Phase 7d: passing code is verified before simplifying, and again before the digest only
+    if the simplifier changed the code (D86)."""
 
     def r(state: PipelineState) -> str:
         target = route(state)
-        return to.get(target, target) if enabled else target
+        if not enabled:
+            return target
+        if target == "opt_baseline":
+            return "verify_code"
+        changed = any(o.accepted for o in state.get("opt_outcomes") or [])
+        return "verify_final" if target == "digest" and changed else target
 
     return r
 
@@ -248,10 +250,8 @@ def build_graph(deps: RunDeps) -> StateGraph:
     )
     edge(
         "coordinate",
-        _via_overseer(
-            partial(_after_coordinate, max_rounds=b.coordinator_max_revise_rounds), "coordinate", ov
-        ),
-        ["scout", "short_plan", "long_plan", "escalation_gate", "oversee_spec"],
+        partial(_after_coordinate, max_rounds=b.coordinator_max_revise_rounds),
+        ["scout", "short_plan", "long_plan", "escalation_gate"],
     )
     edge("scout", lambda s: "design", ["design"])
     edge(

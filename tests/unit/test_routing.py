@@ -177,3 +177,33 @@ def test_replan_when_anything_needs_the_planner() -> None:
     assert advance_without_replan(None, None, None, []) is None  # first roadmap
     moved = done.model_copy(update={"current_milestone_id": "M2"})
     assert advance_without_replan(moved, _met(), None, []) is None  # already advanced
+
+
+# --- D86: the final verifier pass runs only if the simplifier changed the code -----------------
+
+
+def test_final_verify_only_after_an_accepted_simplification() -> None:
+    from r2r.contracts import OptimizationOutcome
+    from r2r.graph.build import _via_verify
+
+    def outcome(accepted: bool) -> OptimizationOutcome:
+        return OptimizationOutcome(
+            created_by="harness",
+            run_id="r",
+            milestone_id="M1",
+            attempt=1,
+            accepted=accepted,
+            reason="x",
+            runtime_before_s=1.0,
+            sloc_before=10,
+        )
+
+    to_digest = _via_verify(lambda s: "digest", enabled=True)
+    assert to_digest({"opt_outcomes": []}) == "digest"
+    assert to_digest({"opt_outcomes": [outcome(False)]}) == "digest"
+    assert to_digest({"opt_outcomes": [outcome(False), outcome(True)]}) == "verify_final"
+    assert _via_verify(lambda s: "opt_baseline", enabled=True)({}) == "verify_code"
+    assert (
+        _via_verify(lambda s: "digest", enabled=False)({"opt_outcomes": [outcome(True)]})
+        == "digest"
+    )

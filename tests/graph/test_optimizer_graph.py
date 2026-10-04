@@ -1,4 +1,4 @@
-"""Phase 6 in the graph: baseline → optimizer attempts → stop rule → digest with runtime metrics."""
+"""Simplifier (D85) in the graph: baseline → attempts → stop rule → digest with runtime metrics."""
 
 from pathlib import Path
 
@@ -54,10 +54,13 @@ def test_patience_stop_then_digest(tmp_path: Path, fake: FakeLLM) -> None:
     assert d.metrics["runtime_final_s"] == d.metrics["runtime_baseline_s"]
     assert "Optimizer stopped: patience" in d.deviations
     md = ch.requests[-1].markdown
-    assert "Optimizer attempts" in md and "#1 vectorize" in md and "reverted" in md
-    # the optimizer saw the first attempt's rejection when proposing the second
+    assert "Simplifier attempts" in md and "#1 vectorize" in md and "reverted" in md
+    assert "complexity" in md
+    # the simplifier saw the first attempt's rejection when proposing the second
     second = [r for r in fake.calls if r.role == "optimizer"][1]
     assert "idea 1" in str(second.messages[1]["content"])
+    # D85: it reads the package source, not a profile
+    assert "### src/sq1/core.py" in str(second.messages[1]["content"])
 
 
 def test_no_bench_skips_optimizer(tmp_path: Path, fake: FakeLLM) -> None:
