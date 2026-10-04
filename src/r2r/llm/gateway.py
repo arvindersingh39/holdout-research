@@ -99,7 +99,8 @@ def call_structured[C: BaseModel](
 
     native = ctx.client.supports_response_schema(model) and model not in _SCHEMA_REJECTED
     tool_name = "submit_" + re.sub(r"(?<!^)(?=[A-Z])", "_", output_model.__name__).lower()
-    structured = _structured_args(native, output_model.__name__, tool_name, schema)
+    grammar = _grammar_schema(schema)
+    structured = _structured_args(native, output_model.__name__, tool_name, grammar)
     meta = {"created_by": role, "run_id": ctx.run_id, "milestone_id": ctx.milestone_id}
 
     error = ""
@@ -124,7 +125,7 @@ def call_structured[C: BaseModel](
             _SCHEMA_REJECTED.add(model)
             log.warning("schema rejected; using a forced tool call", extra={"model": model})
             native = False
-            structured = _structured_args(native, output_model.__name__, tool_name, schema)
+            structured = _structured_args(native, output_model.__name__, tool_name, grammar)
             req = LLMRequest(
                 role=role,
                 model=model,
@@ -157,6 +158,20 @@ _SCHEMA_REJECTED: set[str] = set()  # models whose provider refused our response
 def _is_schema_rejection(e: Exception) -> bool:
     msg = str(e).lower()
     return "response_format" in msg and "schema" in msg
+
+
+GRAMMAR_DROPPED = ("maxItems", "minItems")
+
+
+def _grammar_schema(schema: Any) -> Any:
+    """The schema for the provider's constrained decoding. List size limits are left out: Google's
+    structured output rejects schemas whose nested size limits add up (INVALID_ARGUMENT, probed
+    live on study-3 M9). The prompt's schema text keeps them and validation still enforces them."""
+    if isinstance(schema, dict):
+        return {k: _grammar_schema(v) for k, v in schema.items() if k not in GRAMMAR_DROPPED}
+    if isinstance(schema, list):
+        return [_grammar_schema(v) for v in schema]
+    return schema
 
 
 def _structured_args(native: bool, name: str, tool_name: str, schema: Any) -> dict[str, Any]:

@@ -401,3 +401,23 @@ def test_structured_attempts_is_configurable(ctx: CallContext, fake: FakeLLM) ->
     fake.script("long_planner", "bad", "bad")
     with pytest.raises(ContractViolation):
         _call(ctx)  # the pinned test config keeps 2
+
+
+def test_grammar_schema_has_no_item_counts_but_the_prompt_and_validation_keep_them(
+    ctx: CallContext, fake: FakeLLM
+) -> None:
+    """study-3 M9 (probed live): Google's structured output rejects a schema whose nested list
+    size limits add up (INVALID_ARGUMENT). The provider grammar drops maxItems/minItems; the
+    model still reads them in the prompt's schema text, and validation still enforces them."""
+    fake.script("long_planner", roadmap())
+    _call(ctx)
+    req = fake.calls[0]
+    grammar = json.dumps(req.response_format)
+    assert "maxItems" not in grammar and "minItems" not in grammar
+    assert "maxLength" in grammar  # other constraints stay in the grammar
+    assert "maxItems" in req.messages[0]["content"][0]["text"]  # the limits are still stated
+    too_many = roadmap().model_dump(exclude={"created_by", "run_id", "milestone_id"})
+    too_many["milestones"] = too_many["milestones"] * 11  # > 20 milestones
+    fake.script("long_planner", json.dumps(too_many), json.dumps(too_many), json.dumps(too_many))
+    with pytest.raises(ContractViolation):
+        _call(ctx)
