@@ -73,6 +73,8 @@ class PipelineState(TypedDict, total=False):
     verification: VerificationReport | None  # Phase 7d: what the verifier measured
     fix_rounds: int  # verification mismatches sent back to the coder this milestone
     verify_retry: bool
+    split_request: bool  # the milestone's spec could not fit: the long planner splits it
+    spec_splits: dict[str, int]  # milestone id -> splits already requested (at most one)
     human_note: str | None  # a redirect note waiting for the long-term planner
     budget_blocked: str | None  # node that hit BudgetExceeded (D46)
     budget_message: str | None

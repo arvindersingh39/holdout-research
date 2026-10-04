@@ -241,7 +241,11 @@ def build_graph(deps: RunDeps) -> StateGraph:
         _via_overseer(_after_long_plan, "long_plan", ov),
         ["finish", "roadmap_gate", "short_plan", "oversee_plan"],
     )
-    edge("short_plan", lambda s: "coordinate", ["coordinate"])
+    edge(
+        "short_plan",
+        lambda s: "long_plan" if s.get("split_request") else "coordinate",
+        ["coordinate", "long_plan"],
+    )
     edge(
         "coordinate",
         _via_overseer(

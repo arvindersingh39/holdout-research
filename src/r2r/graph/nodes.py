@@ -129,6 +129,7 @@ def long_plan(state: PipelineState, deps: RunDeps) -> Update:
         "human_note": None,
         "spec": None,
         "verdict": None,
+        "split_request": False,
     }
 
 
@@ -139,16 +140,31 @@ def short_plan(state: PipelineState, deps: RunDeps) -> Update:
     pack = build_pack(query, budget, deps.settings.budgets.context_pack.k, deps.index, deps.blobs)
     issues = _issues(state, "spec")
     previous = state.get("spec") if issues else None
-    spec = run_short_planner(
-        state["roadmap"],
-        m,
-        pack,
-        previous,
-        issues,
-        deps.ctx(m.id, _briefing(state, "short_planner")),
-        data_files=[f"{DATA_DIR}/{n}" for n in _reference_data(deps)],
-        proposal=_proposal_text(state, deps),
-    )
+    try:
+        spec = run_short_planner(
+            state["roadmap"],
+            m,
+            pack,
+            previous,
+            issues,
+            deps.ctx(m.id, _briefing(state, "short_planner")),
+            data_files=[f"{DATA_DIR}/{n}" for n in _reference_data(deps)],
+            proposal=_proposal_text(state, deps),
+        )
+    except ContractViolation as e:  # the milestone is too big to specify within the limits
+        splits = dict(state.get("spec_splits") or {})
+        if splits.get(m.id, 0) >= 1:
+            raise ContractViolation(
+                f"{m.id}: spec still does not fit (split already tried): {str(e)[:300]}"
+            ) from None
+        splits[m.id] = splits.get(m.id, 0) + 1
+        note = (
+            f"The spec for {m.id} could not fit the spec limits ({str(e)[:200]}). "
+            f"Please split {m.id} into two or three smaller milestones, keeping every "
+            "acceptance criterion and the dependency order."
+        )
+        log.warning("spec too large; asking for a split", extra={"milestone": m.id})
+        return {"spec": None, "split_request": True, "spec_splits": splits, "human_note": note}
     return {"spec": spec}
 
 
