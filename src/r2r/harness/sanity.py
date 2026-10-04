@@ -106,12 +106,14 @@ def check_sanity(
     *,
     criteria: Sequence[str],
     required: bool = True,
+    contract_file: str | None = None,
 ) -> list[str]:
     """Design-time problems with the milestone's sanity checks: coverage of `criteria` (D87),
     lint, presence and speed on the reference solution."""
     problems = []
     if required:
-        covered = {cid for c in spec.sanity_checks for cid in c.criterion_ids}
+        checks = [*spec.sanity_checks, *spec.contract_checks]  # D88
+        covered = {cid for c in checks for cid in c.criterion_ids}
         unknown = sorted(covered - set(criteria))
         if unknown:
             problems.append(f"sanity checks name unknown criteria: {', '.join(unknown)}")
@@ -119,18 +121,21 @@ def check_sanity(
             if cid not in covered and cid not in spec.unchecked_criteria:
                 problems.append(
                     f"{cid} has no sanity check: add one (an independent oracle from "
-                    "the equations) or list it in unchecked_criteria with the reason "
-                    "if it has no numerical output"
+                    "the equations), a contract check (interface, documented error or output "
+                    "file), or list it in unchecked_criteria with the reason"
                 )
     by_file: dict[str, float] = {}
     for c in spec.sanity_checks:
         by_file[c.file] = by_file.get(c.file, 0.0) + c.max_seconds
+    if contract_file and spec.contract_checks:  # generated (D88): timed, not linted
+        by_file[contract_file] = sum(c.max_seconds for c in spec.contract_checks)
     for rel, limit in by_file.items():
         path = root / rel
         if not path.is_file():
             problems.append(f"{rel} is missing")
             continue
-        problems += [f"{rel}: {p}" for p in lint_sanity(path.read_text(), set(pkgs))]
+        if rel != contract_file:
+            problems += [f"{rel}: {p}" for p in lint_sanity(path.read_text(), set(pkgs))]
         if reference_cases:
             took = sum(c.seconds for c in reference_cases if c.file == rel)
             if took > limit:

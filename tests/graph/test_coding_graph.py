@@ -223,3 +223,59 @@ def test_oracle_that_calls_the_package_is_redesigned(tmp_path: Path, fake: FakeL
     _run(tmp_path, fake, ch)
     second = [r for r in fake.calls if r.role == "math_designer"][1]
     assert "oracle_square uses square from the package" in str(second.messages[1]["content"])
+
+
+def _with_contracts(d, *checks):
+    from r2r.contracts import ContractCheck
+
+    cc = [ContractCheck.model_validate(c) for c in checks]
+    return d.model_copy(update={"spec": d.spec.model_copy(update={"contract_checks": cc})})
+
+
+INTERFACE = {
+    "id": "C1",
+    "criterion_ids": ["AC1"],
+    "kind": "interface",
+    "call": "sq1.core.square",
+    "params": ["x"],
+}
+
+
+def test_contract_checks_are_generated_frozen_and_counted(tmp_path: Path, fake: FakeLLM) -> None:
+    """D88: the harness renders contract checks into a frozen file that counts for its criteria."""
+    from r2r.harness.contract_checks import contract_file
+
+    _start(fake)
+    fake.script("math_designer", _with_contracts(design(1), INTERFACE))
+    fake.script("coder", *coder_pass(1))
+    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+    deps, res = _run(tmp_path, fake, ch)
+    assert ch.gates == ["roadmap", "tests", "result"]
+    ws = deps.workspace()
+    rel = contract_file("M1")
+    assert rel in res.state["math_spec"].test_files
+    assert "def test_AC1__C1_interface" in (ws.root / rel).read_text()
+    verify(ws)  # hashed with the frozen files
+    assert res.state["digest"].criteria[0].evidence == "3/3 tests pass"  # 2 sanity + 1 contract
+
+
+def test_interface_only_criterion_needs_no_red_test(tmp_path: Path, fake: FakeLLM) -> None:
+    """Stubs already carry the signatures, so an interface check passes on them by design."""
+    _start(fake)
+    fake.script("math_designer", _with_contracts(design(1, sanity=False), INTERFACE))
+    ch = FakeChannel(decide("approve"), decide("stop"))
+    _run(tmp_path, fake, ch)
+    assert ch.gates == ["roadmap", "tests"]  # accepted on the first design
+
+
+def test_wrong_contract_fails_on_the_reference_and_is_redesigned(
+    tmp_path: Path, fake: FakeLLM
+) -> None:
+    wrong = INTERFACE | {"params": ["value"]}
+    _start(fake)
+    fake.script("math_designer", _with_contracts(design(1), wrong), design(1))
+    fake.script("coder", *coder_pass(1))
+    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+    _run(tmp_path, fake, ch)
+    second = [r for r in fake.calls if r.role == "math_designer"][1]
+    assert "test_AC1__C1_interface" in str(second.messages[1]["content"])

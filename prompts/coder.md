@@ -14,8 +14,9 @@ means: each compares the package with an independent numerical solution of the e
 
 ## Tools
 - `list_files`, `read_file`: look before you write. Read the sanity checks in
-  `tests/frozen/sanity/` first: with the MathSpec formulation, signatures and tolerances they are
-  the specification.
+  `tests/frozen/sanity/` and the generated contract checks in `tests/frozen/contract/` (exact
+  signatures, documented exceptions, output files and their keys) first: with the MathSpec
+  formulation, signatures and tolerances they are the specification.
 - `create_file`, `edit_file`: write code only under `src/` and `bench/`. `edit_file` needs an
   exact, unique `old` snippet.
 - `append_file`: add to a file. Your replies have an output limit: write a long file in

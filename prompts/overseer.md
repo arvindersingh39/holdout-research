@@ -35,7 +35,8 @@ retry or stop anything. Your only levers are **briefings** and **flags**.
   them. Units and sign conventions.
 - A sanity check weaker than its criterion (looser tolerance than the method allows, a trivial
   instance that cannot fail), an oracle that is not independent of the package or solves a
-  different equation, or a numerical criterion listed as unchecked.
+  different equation, a numerical criterion listed as unchecked, or an interface, error or file
+  criterion left unchecked when a contract check could decide it.
 - Rejection feedback whose real cause is in the reference or the code rather than the check (dtype
   overflow, wrong seeding, shape broadcasting, JIT warm-up in timings).
 - Repeated failures with the same cause across sessions.

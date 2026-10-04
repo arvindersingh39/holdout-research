@@ -13,9 +13,11 @@ block correct code.
 - `spec.tolerances`: every numeric tolerance your checks use, by name.
 - `spec.sanity_checks` and `spec.test_files`: one entry per check; every sanity file is listed in
   `test_files`, and `test_files` holds sanity files only.
-- `spec.unchecked_criteria`: criteria with no numerical output (a file is written, an interface
-  exists, an error is raised), each with a one-line reason. The owner judges these. Every other
-  criterion needs at least one sanity check.
+- `spec.contract_checks`: interfaces, documented errors and output files, described as data
+  (see below).
+- `spec.unchecked_criteria`: only criteria neither kind of check can decide (e.g. how a figure
+  looks), each with a one-line reason. The owner judges these. Every other criterion needs at
+  least one sanity check or contract check.
 - `spec.bench`, and `spec.figure_scripts` when the milestone draws figures.
 - Never write unit tests outside `tests/frozen/sanity/` or SymPy scripts under `checks/`: the
   harness rejects them.
@@ -54,6 +56,23 @@ Pick the kinds that fit the problem (several per milestone when the maths allows
 Every check calls the real public function directly in the test body: no `try`/`except` around
 it, no `pytest.skip`/`skipif`/`xfail`, no `pytest.raises(NotImplementedError)`. On the stubs it
 must fail **because of their NotImplementedError**, not an import error or a mistake in the check.
+
+## Contract checks (interfaces, documented errors, output files)
+You write no test code for these: describe each as data in `spec.contract_checks` and the harness
+renders and runs it. Fields: `id` "C1", "C2", …, `criterion_ids`, `kind`, `call` (dotted path to
+a public module-level function or class, e.g. `pkg.module.function`, `pkg.module.Class`, or
+`pkg.module.Class.method` for an interface), `args` (keyword arguments as JSON; `{"np": [...]}`
+makes a numpy array; the string `{tmp}` is a fresh temporary folder), and optionally `method` with
+`method_args` to call a method on the returned object.
+- `interface`: `params` lists the parameter names in order (without `self`). Checks the
+  signature only, so it may pass on the stubs.
+- `raises`: `raises` names the documented exception (a builtin name like `ValueError` or a dotted
+  path to the package's own class). The call must raise it.
+- `output`: `file` is a path under `{tmp}/` that the call writes; `format` is json, csv, npy, png
+  or txt; `keys` lists required json paths (`a.b[0].c`) or csv columns. The file must exist,
+  parse in that format and contain the keys.
+Use tiny arguments so each call takes well under a second. The checks must hold on your reference
+solution; every non-interface check must fail on the stubs.
 
 ## Tolerances
 - Derive them from the method: solver tolerances, step size and order, or the estimator's

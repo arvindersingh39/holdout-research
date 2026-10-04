@@ -171,3 +171,49 @@ def test_cli_sandbox_check(image: str) -> None:
     result = CliRunner().invoke(cli.app, ["sandbox", "check"])
     assert result.exit_code == 0, result.output
     assert result.output.count("✓") == 4 and "OK" in result.output
+
+
+def test_contract_checks_run_in_the_sandbox(ws: Workspace, box: DockerBackend) -> None:
+    """D88: generated contract checks (temp files in /tmp, json) work with a read-only root."""
+    from r2r.contracts import ContractCheck
+    from r2r.harness.contract_checks import write_contract_tests
+
+    (ws.root / "src/cpkg").mkdir()
+    (ws.root / "src/cpkg/__init__.py").write_text("")
+    (ws.root / "src/cpkg/io.py").write_text(
+        "import json\n\ndef save(out: str, n: int = 2):\n"
+        "    if n < 0:\n        raise ValueError('n')\n"
+        "    open(out, 'w').write(json.dumps({'n': n}))\n"
+    )
+    base = {"criterion_ids": ["AC9"], "call": "cpkg.io.save"}
+    checks = [
+        ContractCheck(id="C1", kind="interface", params=["out", "n"], **base),
+        ContractCheck(
+            id="C2",
+            kind="raises",
+            args={"out": "{tmp}/x.json", "n": -1},
+            raises="ValueError",
+            **base,
+        ),
+        ContractCheck(
+            id="C3",
+            kind="output",
+            args={"out": "{tmp}/x.json"},
+            file="{tmp}/x.json",
+            format="json",
+            keys=["n"],
+            **base,
+        ),
+    ]
+    write_contract_tests(ws.root, "M9", checks)
+    from r2r.harness.tests import run_tests_detailed
+
+    _, cases = run_tests_detailed(
+        ws, box, timeout_s=LIMITS.test_timeout_s, require_frozen=False, **META
+    )
+    mine = {c.name: c.outcome for c in cases if "contract" in c.file}
+    assert mine == {
+        "test_AC9__C1_interface": "passed",
+        "test_AC9__C2_raises": "passed",
+        "test_AC9__C3_output": "passed",
+    }

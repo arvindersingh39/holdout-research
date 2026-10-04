@@ -50,6 +50,8 @@ from r2r.harness.autopilot import Facts
 from r2r.harness.autopilot import decide as decide_gate
 from r2r.harness.bench import BenchFailed
 from r2r.harness.checks import run_checks
+from r2r.harness.contract_checks import CONTRACT_DIR, write_contract_tests
+from r2r.harness.contract_checks import render as render_contract
 from r2r.harness.frozen import FrozenTamper, freeze, restore
 from r2r.harness.gitops import Git
 from r2r.harness.optimize import Baseline, baseline, source_listing, try_patch
@@ -285,6 +287,13 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
             "design_attempts": failed + 1,
             "design_feedback": f"The design could not be written: {e}",
         }
+    contract = write_contract_tests(ws.root, m.id, out.spec.contract_checks)  # D88
+    if contract:
+        out = out.model_copy(
+            update={
+                "spec": out.spec.model_copy(update={"test_files": [*out.spec.test_files, contract]})
+            }
+        )
     timeout = deps.settings.budgets.sandbox.test_timeout_s
     checks = run_checks(ws, box, timeout)
     result, cases = run_tests_detailed(
@@ -300,9 +309,19 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
             milestone_id=m.id,
             timeout_s=timeout,
         )
-    checked = [c.id for c in spec.acceptance_criteria if c.id not in out.spec.unchecked_criteria]
+    # D87/D88: a check must be red on the stubs for every criterion except those the owner judges
+    # and those covered only by interface checks (stubs already carry the signatures)
+    red = {cid for c in out.spec.sanity_checks for cid in c.criterion_ids} | {
+        cid for c in out.spec.contract_checks if c.kind != "interface" for cid in c.criterion_ids
+    }
+    checked = [
+        c.id
+        for c in spec.acceptance_criteria
+        if c.id not in out.spec.unchecked_criteria
+        and (c.id in red or not _interface_only(c.id, out))
+    ]
     rg = assess(
-        checked,  # D87: criteria without numerical output are the owner's to judge
+        checked,
         cases,
         checks,
         out.spec.test_files,
@@ -315,6 +334,7 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
         sanity_packages(ws.root / "src"),
         criteria=[c.id for c in spec.acceptance_criteria],
         required=deps.settings.budgets.sanity.required,
+        contract_file=contract,
     )
     ok = rg.ok and not sanity
     problems = [] if rg.ok else [rg.describe()]
@@ -327,6 +347,12 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
         "design_feedback": None if ok else "\n".join(problems),
         "perf_unmet": rg.perf_unmet,
     }
+
+
+def _interface_only(cid: str, out) -> bool:
+    kinds = {c.kind for c in out.spec.contract_checks if cid in c.criterion_ids}
+    covered_elsewhere = any(cid in c.criterion_ids for c in out.spec.sanity_checks)
+    return kinds == {"interface"} and not covered_elsewhere
 
 
 def freeze_tests(state: PipelineState, deps: RunDeps) -> Update:
@@ -1068,6 +1094,11 @@ def revise_test(state: PipelineState, deps: RunDeps) -> Update:
     feedback = (
         f"The owner accepted the coder's dispute of a frozen test:\n{state.get('dispute')}\n"
         f"Rewrite ONLY {file}. Keep every other file exactly as it is."
+        + (
+            " It is generated from spec.contract_checks: correct the disputed entry there."
+            if file and file.startswith(CONTRACT_DIR + "/")
+            else ""
+        )
     )
     fail: Update = {"dispute": None, "coder_message": "Test revision failed; see the dispute."}
     if not file or not deps.reference_dir(m.id).is_dir():
@@ -1088,12 +1119,18 @@ def revise_test(state: PipelineState, deps: RunDeps) -> Update:
         )
     except ContractViolation:
         return fail
-    new = [f for f in out.files if f.path == file and f.purpose == "test"]
-    if not new:
-        return fail
+    if file.startswith(CONTRACT_DIR + "/"):  # D88: generated; the designer corrects the data
+        if not out.spec.contract_checks:
+            return fail
+        content = render_contract(m.id, out.spec.contract_checks)
+    else:
+        new = [f for f in out.files if f.path == file and f.purpose == "test"]
+        if not new:
+            return fail
+        content = new[0].content
     target = ws.root / file
     target.chmod(0o644)
-    target.write_text(new[0].content)
+    target.write_text(content)
     timeout = deps.settings.budgets.sandbox.test_timeout_s
     _, ref_cases = check_reference(
         ws,
