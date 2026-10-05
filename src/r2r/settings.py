@@ -178,7 +178,7 @@ class WhatsAppGates(_Strict):
 
 
 class GatesConfig(_Strict):
-    channel: Literal["cli", "whatsapp"]
+    channel: Literal["cli", "whatsapp", "telegram"]
     approve_first_roadmap: bool
     roadmap_changes: Literal["material_only", "always"]
     review_tests: Literal["always", "first_milestone", "never"]
@@ -262,6 +262,8 @@ class Secrets(BaseModel):
     whatsapp_verify_token: SecretStr | None = None
     whatsapp_owner_number: str | None = None
     public_webhook_url: str | None = None
+    telegram_bot_token: SecretStr | None = None  # D91: from @BotFather
+    telegram_chat_id: str | None = None  # the owner's chat (`r2r telegram chat-id`)
 
 
 # --- top level -------------------------------------------------------------------------

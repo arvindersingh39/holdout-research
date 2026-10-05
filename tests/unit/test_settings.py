@@ -77,7 +77,7 @@ def test_missing_file_rejected(config_dir: Path) -> None:
         ("budgets.yaml", lambda d: d.update(usd_cap_milestone=-1)),
         ("budgets.yaml", lambda d: d.update(usd_cap_milestone=50.0)),
         ("budgets.yaml", lambda d: d.update(unknown_key=1)),
-        ("budgets.yaml", lambda d: d["gates"].update(channel="telegram")),
+        ("budgets.yaml", lambda d: d["gates"].update(channel="carrier-pigeon")),  # unknown channel
         ("budgets.yaml", lambda d: d["gates"].update(review_tests="sometimes")),
         ("budgets.yaml", lambda d: d["sandbox"].update(memory="lots")),
         ("budgets.yaml", lambda d: d["ingest"].update(chunk_overlap_tokens=800)),

@@ -113,7 +113,8 @@ SHOWABLE = (
 )
 RunsBase = Annotated[Path | None, typer.Option(help="Where runs/ lives (default: repo)")]
 ChannelOpt = Annotated[
-    str | None, typer.Option(help="Gate channel: terminal or whatsapp (default: budgets.yaml)")
+    str | None,
+    typer.Option(help="Gate channel: cli, whatsapp or telegram (default: budgets.yaml)"),
 ]
 
 
@@ -168,6 +169,19 @@ def make_channel(settings: Settings, override: str | None = None):
     from r2r.graph.gates import TerminalChannel
 
     wanted = override or settings.budgets.gates.channel
+    if wanted == "telegram":
+        s = settings.secrets
+        if s.telegram_bot_token and s.telegram_chat_id:
+            from r2r.telegram.channel import TelegramChannel
+            from r2r.telegram.client import TelegramClient
+
+            client = TelegramClient(s.telegram_bot_token.get_secret_value())
+            console.print("Gates go to Telegram; answer them there (Ctrl-C is safe).")
+            return TelegramChannel(client, s.telegram_chat_id)
+        console.print(
+            "[yellow]TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set in .env; using the terminal.[/]"
+        )
+        return TerminalChannel(console=console)
     if wanted == "whatsapp":
         if _whatsapp_ready(settings):
             from r2r.whatsapp.channel import WhatsAppChannel
@@ -238,6 +252,44 @@ def resume(
 ) -> None:
     """Continue a run from its last checkpoint (for example a gate you left pending)."""
     _drive(_with_autopilot(_deps(run_id, runs_base), autopilot), start=False, channel=channel)
+
+
+telegram_app = typer.Typer(help="Telegram gate channel (D91).")
+app.add_typer(telegram_app, name="telegram")
+
+
+def _telegram_client():
+    from r2r.telegram.client import TelegramClient
+
+    token = project_settings().secrets.telegram_bot_token
+    if token is None:
+        console.print(
+            "[red]TELEGRAM_BOT_TOKEN is not set in .env[/] (create a bot with @BotFather)"
+        )
+        raise typer.Exit(2)
+    return TelegramClient(token.get_secret_value())
+
+
+@telegram_app.command("chat-id")
+def telegram_chat_id() -> None:
+    """Print the chat ids that recently wrote to your bot (send it /start first)."""
+    chats = _telegram_client().recent_chats()
+    if not chats:
+        console.print("No messages yet: send /start to your bot in Telegram, then run this again.")
+        raise typer.Exit(1)
+    for chat in chats:
+        console.print(f"TELEGRAM_CHAT_ID={chat}")
+
+
+@telegram_app.command("test")
+def telegram_test() -> None:
+    """Send a test message to TELEGRAM_CHAT_ID."""
+    chat = project_settings().secrets.telegram_chat_id
+    if not chat:
+        console.print("[red]TELEGRAM_CHAT_ID is not set in .env[/] (see `r2r telegram chat-id`)")
+        raise typer.Exit(2)
+    _telegram_client().send_message(chat, "r2r is connected: gates will arrive here.")
+    console.print("Sent. Check Telegram.")
 
 
 @app.command("extend")
