@@ -483,8 +483,12 @@ def test_cut_off_replies_say_so_and_stop_after_two(ctx: CallContext, fake: FakeL
     cut = LLMResponse(model="m", text="", input_tokens=100, output_tokens=7000, truncated=True)
     fake.script("long_planner", cut, roadmap())  # cut once, then a valid answer
     assert _call(ctx).goal == roadmap().goal
-    repair = fake.calls[1].messages[-1]["content"]
-    assert "output limit" in repair and "shorter" in repair
+    sent_back, last = fake.calls[1].messages[-2:]
+    repair = last["content"]
+    assert sent_back["role"] == "assistant"  # the partial reply goes back for trimming
+    assert "output limit" in repair and "7000" in repair  # how big it was
+    assert "COMPLETE answer again, condensed" in repair and "every required" in repair
+    assert "did not come through" in repair  # this partial was empty
     fake.script("long_planner", cut, cut, roadmap())
     with pytest.raises(ContractViolation, match="output limit"):
         _call(ctx)

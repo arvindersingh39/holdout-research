@@ -43,6 +43,12 @@ OUTPUT_INSTRUCTIONS = (
     "\n\n## Output format\nReply with one JSON object that matches this JSON schema. "
     "No prose and no code fences.\n{schema}"
 )
+TRIM = (
+    "your reply was cut off at the output limit: it used {used} of {limit} tokens before it was "
+    "complete{partial}. Write the COMPLETE answer again, condensed to about {target} tokens: keep "
+    "every required field and file, but shorten docstrings and comments, drop repeated helpers "
+    "and examples, keep checks to tiny instances, and never repeat code across files."
+)
 REPAIR = (
     "Your previous output was rejected:\n{error}\n\nReply again with one corrected JSON object "
     "that matches the schema and stays within every stated limit."
@@ -145,9 +151,11 @@ def call_structured[C: BaseModel](
         raw = _raw_output(resp, native)
         if resp.truncated:  # study-3 M11: an identical retry is cut off again; say why, stop at two
             cut_offs += 1
-            error = (
-                f"your reply was cut off at the output limit ({max_out} tokens) before it was "
-                "complete; write a shorter answer: fewer and shorter files, no repetition"
+            error = TRIM.format(
+                used=resp.output_tokens or max_out,
+                limit=max_out,
+                target=int(max_out * 0.6),
+                partial="" if raw else " (the partial reply did not come through)",
             )
             log.warning("output cut off", extra={"role": role, "attempt": attempt})
             ctx.ledger.annotate_latest(ctx.run_id, role, f"rejected output: {error}"[:500])
@@ -421,7 +429,8 @@ def _attempt(req: LLMRequest, prices: tuple[float, float], ctx: CallContext) -> 
         resp = ctx.client.complete(req)
     except LLMCallError as e:
         _record(ctx, req, ok=False, error=str(e)[:500])
-        log.warning(
+        expected = _is_schema_rejection(e) or _is_forced_tool_refusal(e)  # handled by the ladder
+        (log.info if expected else log.warning)(
             "llm call failed", extra={"role": req.role, "model": req.model, "error": str(e)[:300]}
         )
         raise

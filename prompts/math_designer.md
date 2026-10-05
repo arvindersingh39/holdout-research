@@ -25,8 +25,12 @@ block correct code.
 ## Sanity checks (the only tests)
 Write `tests/frozen/sanity/test_sanity_<topic>.py` (purpose "test") with:
 - `oracle_<name>(...)` functions that compute the expected result **from the equations alone**,
-  using only numpy, scipy, math and the standard library. An oracle never imports or calls the
-  package (the harness rejects that): it is a second, independent, simple method.
+  using only numpy, scipy, math and the standard library. An oracle never uses this milestone's
+  new code (the harness rejects that): it is a second, independent, simple method.
+- Exception: when a criterion says new code must **match existing behaviour** (a wrapper, a
+  vectorised or faster version, a refactor), the oracle may call modules from earlier milestones
+  that this design does not rewrite: they are already verified by their own frozen checks. Do
+  not re-implement them. Every check must still call the new code.
 - `test_<CRITERION>__S<k>_<what>` functions, e.g. `test_AC2__S1_matches_solve_ivp`, that call the
   package's public function and compare it with an oracle on a **tiny instance** (small
   dimensions, few steps, small samples), with fixed seeds. Each check runs in seconds; `max_seconds`

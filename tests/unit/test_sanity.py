@@ -206,3 +206,56 @@ def test_complexity_counts_statements_and_calls(tmp_path) -> None:
     assert complexity(long) == 5  # def, assign, return + 2 calls
     assert complexity(short) == 4  # def, return + 2 calls
     assert complexity(tmp_path / "missing") == 0
+
+
+# --- D92: earlier, already-verified modules may serve as oracles ---------------------------------
+
+WRAPPER = """
+import numpy as np
+from model.ode import solve
+from model.batch import solve_many
+
+
+def oracle_each(inits):
+    return np.array([solve(x, 0.3, 1.0) for x in inits])
+
+
+def test_AC1__S1_batch_matches_scalar():
+    inits = [0.01, 0.02]
+    np.testing.assert_allclose(solve_many(inits, 0.3, 1.0), oracle_each(inits))
+"""
+
+
+def test_trusted_module_may_be_the_oracle() -> None:
+    assert lint_sanity(WRAPPER, PKG, trusted={"model.ode"}) == []
+    untrusted = lint_sanity(WRAPPER, PKG)  # without the rule the oracle uses the package
+    assert any("oracle_each uses solve" in p for p in untrusted)
+
+
+def test_the_new_code_is_never_trusted() -> None:
+    cheat = WRAPPER.replace("solve(x, 0.3, 1.0) for x in inits", "solve_many(inits, 0.3, 1.0)")
+    cheat = cheat.replace("np.array([solve_many(inits, 0.3, 1.0)])", "solve_many(inits, 0.3, 1.0)")
+    problems = lint_sanity(cheat, PKG, trusted={"model.ode"})
+    assert any("solve_many" in p for p in problems)
+
+
+def test_a_check_must_call_the_new_code() -> None:
+    only_old = WRAPPER.replace("solve_many(inits, 0.3, 1.0)", "solve(0.01, 0.3, 1.0)")
+    problems = lint_sanity(only_old, PKG, trusted={"model.ode"})
+    assert any("test_AC1__S1_batch_matches_scalar" in p for p in problems)
+
+
+def test_trusted_modules_are_committed_ones_the_design_does_not_touch(tmp_path) -> None:
+    from r2r.harness.gitops import Git
+    from r2r.harness.sanity import trusted_modules
+    from r2r.harness.workspace import Workspace
+    from r2r.store.runs import run_paths
+
+    ws = Workspace.create(run_paths("r", base=tmp_path, create=True))
+    for rel in ("src/model/__init__.py", "src/model/ode.py", "src/model/env.py"):
+        (ws.root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ws.root / rel).write_text("x = 1\n")
+    Git(ws).commit("earlier milestones")
+    (ws.root / "src/model/batch.py").write_text("y = 2\n")  # this design's new module
+    trusted = trusted_modules(ws, written=["src/model/batch.py", "src/model/env.py"])
+    assert trusted == {"model.ode"}  # env.py is touched by the design, batch.py is new

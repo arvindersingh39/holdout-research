@@ -62,7 +62,7 @@ from r2r.harness.refdata import describe as describe_data
 from r2r.harness.refdata import install as install_data
 from r2r.harness.refdata import snapshot as snapshot_data
 from r2r.harness.reference import ReferenceError, check_reference, store_reference
-from r2r.harness.sanity import check_sanity, skip_unchecked
+from r2r.harness.sanity import check_sanity, skip_unchecked, trusted_modules
 from r2r.harness.sanity import packages as sanity_packages
 from r2r.harness.stoprule import decide
 from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
@@ -338,6 +338,7 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
         sanity_packages(ws.root / "src"),
         criteria=criteria,
         contract_file=contract,
+        trusted=trusted_modules(ws, [f.path for f in out.files]),
     )
     ok = rg.ok and not sanity
     problems = [] if rg.ok else [rg.describe()]

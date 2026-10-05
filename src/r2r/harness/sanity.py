@@ -14,7 +14,9 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from r2r.contracts import MathSpec
+from r2r.harness.gitops import Git
 from r2r.harness.tests import CaseOutcome
+from r2r.harness.workspace import Workspace
 
 
 def packages(src: Path) -> set[str]:
@@ -29,43 +31,71 @@ def _top(module: str | None) -> str:
     return (module or "").split(".", 1)[0]
 
 
-def _bound_by_package(tree: ast.Module, pkgs: set[str]) -> set[str]:
-    """Module-level names that refer to the package under test."""
-    names: set[str] = set()
+def _is_trusted(module: str, trusted: set[str]) -> bool:
+    return module in trusted
+
+
+def _bound_by_package(
+    tree: ast.Module, pkgs: set[str], trusted: set[str] = frozenset()
+) -> tuple[set[str], set[str]]:
+    """Module-level names bound to the package: (new code, trusted earlier modules, D92)."""
+    new: set[str] = set()
+    old: set[str] = set()
     for node in tree.body:
         if isinstance(node, ast.Import):
             for a in node.names:
                 if _top(a.name) in pkgs:
-                    names.add(a.asname or _top(a.name))
+                    if a.asname and _is_trusted(a.name, trusted):
+                        old.add(a.asname)
+                    else:
+                        new.add(a.asname or _top(a.name))
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and _top(node.module) in pkgs:
-            names.update(a.asname or a.name for a in node.names)
-    return names
+            for a in node.names:
+                name = a.asname or a.name
+                if _is_trusted(node.module, trusted) or _is_trusted(
+                    f"{node.module}.{a.name}", trusted
+                ):
+                    old.add(name)
+                else:
+                    new.add(name)
+    return new, old
 
 
 def _names(fn: ast.AST) -> set[str]:
     return {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
 
 
-def _imports_package(fn: ast.AST, pkgs: set[str]) -> bool:
+def _imports_package(fn: ast.AST, pkgs: set[str], trusted: set[str] = frozenset()) -> bool:
+    """An import inside `fn` of package code other than trusted earlier modules."""
     for n in ast.walk(fn):
-        if isinstance(n, ast.Import) and any(_top(a.name) in pkgs for a in n.names):
+        if isinstance(n, ast.Import) and any(
+            _top(a.name) in pkgs and not _is_trusted(a.name, trusted) for a in n.names
+        ):
             return True
-        if isinstance(n, ast.ImportFrom) and n.level == 0 and _top(n.module) in pkgs:
+        if (
+            isinstance(n, ast.ImportFrom)
+            and n.level == 0
+            and _top(n.module) in pkgs
+            and not _is_trusted(n.module, trusted)
+        ):
             return True
     return False
 
 
-def lint_sanity(text: str, pkgs: set[str]) -> list[str]:
-    """Problems with one sanity file; empty when the oracle is independent of the package."""
+def lint_sanity(text: str, pkgs: set[str], trusted: set[str] = frozenset()) -> list[str]:
+    """Problems with one sanity file; empty when the oracle is independent of the code it checks.
+    D92: modules in `trusted` (verified by earlier milestones) may serve as oracles; the
+    milestone's new code never may, and every check must call it."""
     try:
         tree = ast.parse(text)
     except SyntaxError as e:
         return [f"syntax error: {e.msg} (line {e.lineno})"]
-    pkg_names = _bound_by_package(tree, pkgs)
+    pkg_names, _trusted_names = _bound_by_package(tree, pkgs, trusted)
     funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
     problems = []
     if not pkg_names:
-        problems.append(f"never imports the package ({', '.join(sorted(pkgs))}) it checks")
+        what = "this milestone's new code" if _trusted_names else "the package"
+        problems.append(f"never imports {what} ({', '.join(sorted(pkgs))}) it checks")
     # helpers that touch the package (directly or through another helper) taint their callers
     tainted = {name for name, fn in funcs.items() if _names(fn) & pkg_names}
     grew = True
@@ -86,7 +116,7 @@ def lint_sanity(text: str, pkgs: set[str]) -> list[str]:
                 f"{name} uses {', '.join(used)} from the package: an oracle must "
                 "be independent of the code it checks"
             )
-        if _imports_package(fn, pkgs):
+        if _imports_package(fn, pkgs, trusted):
             problems.append(f"{name} imports the package: an oracle must be independent of it")
     tests = [n for n in funcs if n.startswith("test_")]
     if not tests:
@@ -96,6 +126,18 @@ def lint_sanity(text: str, pkgs: set[str]) -> list[str]:
         if not (seen & set(oracles)) or not (seen & (pkg_names | tainted)):
             problems.append(f"{name} must compare the package's output with an oracle_* result")
     return problems
+
+
+def trusted_modules(ws: Workspace, written: Iterable[str]) -> set[str]:
+    """D92: modules committed by earlier milestones that this design does not write: verified by
+    their own frozen checks, so they may serve as oracles for wrappers and refactors."""
+    tracked = Git(ws).run("ls-files", "--", "src").split()
+    touched = set(written)
+    return {
+        p.removeprefix("src/").removesuffix(".py").replace("/", ".")
+        for p in tracked
+        if p.endswith(".py") and not p.endswith("__init__.py") and p not in touched
+    }
 
 
 SKIPPED = "no sanity or contract check: skipped, the owner judges it"
@@ -117,6 +159,7 @@ def check_sanity(
     *,
     criteria: Sequence[str],
     contract_file: str | None = None,
+    trusted: set[str] = frozenset(),
 ) -> list[str]:
     """Design-time problems with the milestone's checks: unknown criteria, lint, presence and
     speed on the reference solution. Criteria without a check are skipped (`skip_unchecked`)."""
@@ -136,7 +179,7 @@ def check_sanity(
             problems.append(f"{rel} is missing")
             continue
         if rel != contract_file:
-            problems += [f"{rel}: {p}" for p in lint_sanity(path.read_text(), set(pkgs))]
+            problems += [f"{rel}: {p}" for p in lint_sanity(path.read_text(), set(pkgs), trusted)]
         if reference_cases:
             took = sum(c.seconds for c in reference_cases if c.file == rel)
             if took > limit:
