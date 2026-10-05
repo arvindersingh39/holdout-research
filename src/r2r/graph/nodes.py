@@ -66,7 +66,7 @@ from r2r.harness.sanity import check_sanity, skip_unchecked
 from r2r.harness.sanity import packages as sanity_packages
 from r2r.harness.stoprule import decide
 from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
-from r2r.harness.verify import run_verify
+from r2r.harness.verify import coder_can_fix, run_verify
 from r2r.ingest.documents import wrap_document
 from r2r.ingest.proposal import ingest_proposal
 from r2r.llm.gateway import BudgetExceeded, ContractViolation
@@ -433,14 +433,12 @@ def _verify(state: PipelineState, deps: RunDeps) -> VerificationReport:
 
 
 def verify_code(state: PipelineState, deps: RunDeps) -> Update:
-    """Phase 7d: run the frozen verify scripts on passing code; wrong values go back to the
-    coder (at most `autopilot.max_fix_rounds` times) before optimising."""
+    """Phase 7d: run the frozen verify scripts on passing code; wrong values and crashes in the
+    package go back to the coder (at most `autopilot.max_fix_rounds` times) before simplifying.
+    A failure in a verify script itself goes to the owner instead."""
     rep = _verify(state, deps)
     rounds = state.get("fix_rounds", 0)
-    retry = (
-        rep.status in ("mismatch", "error")
-        and rounds < deps.settings.budgets.autopilot.max_fix_rounds
-    )
+    retry = coder_can_fix(rep) and rounds < deps.settings.budgets.autopilot.max_fix_rounds
     if rep.status != "none":
         log.warning("verification", extra={"status": rep.status, "mismatched": rep.n_mismatched})
     return {"verification": rep, "verify_retry": retry, "fix_rounds": rounds + int(retry)}

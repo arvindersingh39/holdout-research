@@ -166,3 +166,48 @@ def test_copied_values_are_an_error() -> None:
     stubs = ((0, 52), (1, 162))
     exact_ints = [{"ref": f"ensemble.graphs[{i}].n_stubs", "generated": n} for i, n in stubs]
     assert not compare_entries(exact_ints * 2, REF).errors  # counts legitimately match exactly
+
+
+# --- which verification failures the coder can fix ------------------------------------------------
+
+
+def _rep(status: str, failed=(), log=""):
+    from r2r.contracts import VerificationReport
+
+    return VerificationReport(
+        created_by="harness",
+        run_id="r",
+        milestone_id="M1",
+        status=status,
+        failed_scripts=list(failed),
+        log_tail=log,
+    )
+
+
+SCRIPT = "tests/frozen/verify/verify_m4.py"
+IN_SCRIPT = f"""{SCRIPT}: exit 1
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "{SCRIPT}", line 9, in main
+    with open('tests/frozen/data/recorded_values.json') as f:
+FileNotFoundError: [Errno 2] No such file or directory"""
+IN_CODE = f"""{SCRIPT}: exit 1
+Traceback (most recent call last):
+  File "{SCRIPT}", line 5, in main
+    v = solve()
+  File "src/pkg/core.py", line 3, in solve
+    return 1 / 0
+ZeroDivisionError: division by zero"""
+
+
+def test_coder_fixes_wrong_values_and_crashes_in_its_code_only() -> None:
+    """study-3: a frozen verify script that read hidden data crashed every milestone, and the coder
+    was sent back twice each time to fix what only the script's author could."""
+    from r2r.harness.verify import coder_can_fix
+
+    assert coder_can_fix(_rep("mismatch"))
+    assert coder_can_fix(_rep("error", [SCRIPT], IN_CODE))  # a crash inside src/
+    assert not coder_can_fix(_rep("error", [SCRIPT], IN_SCRIPT))  # the script's own fault
+    assert not coder_can_fix(_rep("error", [], f"{SCRIPT}: copied: all 5 decimal values ..."))
+    assert not coder_can_fix(_rep("error", [SCRIPT], f"{SCRIPT}: wrote no results/verify/x.json"))
+    assert not coder_can_fix(_rep("verified")) and not coder_can_fix(_rep("none"))

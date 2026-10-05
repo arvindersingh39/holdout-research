@@ -130,6 +130,35 @@ def _reference(ws: Workspace) -> dict[str, Any]:
     return merged
 
 
+_FRAME = re.compile(r'File "([^"]+)"')
+
+
+def coder_can_fix(rep: VerificationReport) -> bool:
+    """Wrong values, or a crash inside the package, go back to the coder. A failure in a frozen
+    verify script itself (a bug in the script, reading hidden data, copied values, no report)
+    is not the coder's to fix: it goes to the owner (study-3)."""
+    if rep.status == "mismatch":
+        return True
+    if rep.status != "error":
+        return False
+    blocks: dict[str, list[str]] = {}
+    current = None
+    for line in rep.log_tail.splitlines():
+        head = line.split(":", 1)[0]
+        if head.startswith(VERIFY_DIR + "/"):
+            current = head
+            blocks.setdefault(current, [])
+        elif current is not None:
+            blocks[current] += _FRAME.findall(line)
+    for script in rep.failed_scripts:
+        frames = [
+            f for f in blocks.get(script, []) if f != "<string>" and "/site-packages/" not in f
+        ]
+        if frames and not frames[-1].startswith(VERIFY_DIR + "/"):
+            return True  # the last frame is in the package (or another source file)
+    return False
+
+
 def run_verify(
     ws: Workspace,
     sandbox: SandboxBackend,
