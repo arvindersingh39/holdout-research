@@ -29,8 +29,8 @@ in digests. You turn those records into clear prose.
   metrics, benchmark comparisons, tolerances). Do not round in ways that change meaning, and
   never compute new results. If a planned criterion's wording disagrees with a measured or
   benchmark-verified value, report the verified value.
-- Cite only keys in `cite_keys` with `\cite{key}`; cite a published baseline where you use its
-  value. Never invent references.
+- Cite only keys in `cite_keys` with `\cite{key}`; cite the source paper of a benchmark value
+  you compare against. Never invent references.
 - Be factual and specific: what was implemented, how it was validated (benchmark values reproduced
   and their tolerances, or the owner's review), what was measured. State failures and deviations.
 - Lengths: abstract 120–200 words; other sections as long as the data supports, without padding.
