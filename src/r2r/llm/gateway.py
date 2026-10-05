@@ -156,8 +156,11 @@ _SCHEMA_REJECTED: set[str] = set()  # models whose provider refused our response
 
 
 def _is_schema_rejection(e: Exception) -> bool:
+    """The provider refused the native structured-output schema (not the request as a whole):
+    OpenAI's strict mode ("Invalid schema for response_format …") or Anthropic's grammar limit
+    ("Schema is too complex", study-3 M9). Both accept the same schema as a forced tool call."""
     msg = str(e).lower()
-    return "response_format" in msg and "schema" in msg
+    return ("response_format" in msg and "schema" in msg) or "schema is too complex" in msg
 
 
 GRAMMAR_DROPPED = ("maxItems", "minItems")

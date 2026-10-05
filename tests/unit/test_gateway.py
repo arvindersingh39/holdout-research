@@ -356,16 +356,24 @@ def test_finalize_overflow_twice_is_contract_violation(ctx: CallContext, fake: F
 # --- strict schema providers (study-1: OpenAI rejected the MilestoneSpecDraft schema) -----------
 
 
-def test_schema_rejection_falls_back_to_forced_tool_call(ctx: CallContext) -> None:
+@pytest.mark.parametrize(
+    "message",
+    [
+        "BadRequestError: Invalid schema for response_format 'Roadmap': In context=(), "
+        "'required' is required to be supplied and to be an array including every key",
+        # study-3 M9: Anthropic's native structured output refused the MathDesign grammar
+        'BadRequestError: litellm.BadRequestError: AnthropicException - {"type":"error",'
+        '"error":{"type":"invalid_request_error","message":"Schema is too complex."}}',
+    ],
+    ids=["openai-strict", "anthropic-too-complex"],
+)
+def test_schema_rejection_falls_back_to_forced_tool_call(ctx: CallContext, message: str) -> None:
     from r2r.llm import gateway
     from r2r.llm.client import LLMCallError
 
     fake = FakeLLM(native_schema=True)
     ctx = CallContext(**{**ctx.__dict__, "client": fake})
-    rejection = LLMCallError(
-        "BadRequestError: Invalid schema for response_format 'Roadmap': In context=(), "
-        "'required' is required to be supplied and to be an array including every key"
-    )
+    rejection = LLMCallError(message)
     fake.script("long_planner", rejection, roadmap(), roadmap())
     model = ctx.settings.models.roles["long_planner"].model
     gateway._SCHEMA_REJECTED.discard(model)
