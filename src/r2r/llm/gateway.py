@@ -108,6 +108,7 @@ def call_structured[C: BaseModel](
     meta = {"created_by": role, "run_id": ctx.run_id, "milestone_id": ctx.milestone_id}
 
     error = ""
+    cut_offs = 0
     attempts = ctx.settings.budgets.structured_attempts
     for attempt in range(1, attempts + 1):
         while True:  # step down native → forced tool → JSON text while the provider refuses
@@ -140,13 +141,29 @@ def call_structured[C: BaseModel](
                     raise
         native = mode != "tool"
         raw = _raw_output(resp, native)
-        try:
-            parsed = _parse(raw, output_model, meta, model)
-            return finalize(parsed) if finalize is not None else parsed
-        except (ValueError, ContractTooLarge) as e:  # ValidationError is a ValueError
-            error = _describe(e)
-            log.warning("invalid output", extra={"role": role, "attempt": attempt, "error": error})
+        if resp.truncated:  # study-3 M11: an identical retry is cut off again; say why, stop at two
+            cut_offs += 1
+            error = (
+                f"your reply was cut off at the output limit ({max_out} tokens) before it was "
+                "complete; write a shorter answer: fewer and shorter files, no repetition"
+            )
+            log.warning("output cut off", extra={"role": role, "attempt": attempt})
             ctx.ledger.annotate_latest(ctx.run_id, role, f"rejected output: {error}"[:500])
+            if cut_offs >= CUT_OFF_STOP:
+                raise ContractViolation(
+                    f"{role}: {output_model.__name__} cut off at the output limit "
+                    f"({max_out} tokens) {cut_offs} times in a row"
+                )
+        else:
+            try:
+                parsed = _parse(raw, output_model, meta, model)
+                return finalize(parsed) if finalize is not None else parsed
+            except (ValueError, ContractTooLarge) as e:  # ValidationError is a ValueError
+                error = _describe(e)
+                log.warning(
+                    "invalid output", extra={"role": role, "attempt": attempt, "error": error}
+                )
+                ctx.ledger.annotate_latest(ctx.run_id, role, f"rejected output: {error}"[:500])
         if attempt < attempts:
             messages += [
                 {"role": "assistant", "content": raw or ""},
@@ -324,6 +341,7 @@ def _embed_batch(model: str, batch: list[str], ctx: CallContext) -> list[list[fl
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+CUT_OFF_STOP = 2  # structured replies cut off at the output limit in a row, then stop
 STUCK_AFTER = 3  # identical failing turns in a row end a tool loop (plain Python, D69)
 CUT_OFF = (
     "error: your reply hit the output limit ({limit} tokens) and this call was cut off before "

@@ -457,3 +457,19 @@ def test_forced_tool_refusal_falls_back_to_json_text(ctx: CallContext) -> None:
     assert fake.calls[3].response_format is None and fake.calls[3].tools is None
     gateway._SCHEMA_REJECTED.discard(model)
     gateway._TEXT_ONLY.discard(model)
+
+
+def test_cut_off_replies_say_so_and_stop_after_two(ctx: CallContext, fake: FakeLLM) -> None:
+    """study-3 M11: six designer replies hit the output limit before any answer; each retry was
+    identical. A cut-off reply is named as such in the repair, and two in a row end the call."""
+    from r2r.llm.client import LLMResponse
+
+    cut = LLMResponse(model="m", text="", input_tokens=100, output_tokens=7000, truncated=True)
+    fake.script("long_planner", cut, roadmap())  # cut once, then a valid answer
+    assert _call(ctx).goal == roadmap().goal
+    repair = fake.calls[1].messages[-1]["content"]
+    assert "output limit" in repair and "shorter" in repair
+    fake.script("long_planner", cut, cut, roadmap())
+    with pytest.raises(ContractViolation, match="output limit"):
+        _call(ctx)
+    assert fake.pending("long_planner") == 1  # the third call was never made
