@@ -117,6 +117,7 @@ def call_structured[C: BaseModel](
                 model=model,
                 messages=[*messages, *_mode_messages(mode, tool_name)],
                 max_tokens=max_out,
+                timeout_s=timeout_for(max_out),
                 thinking=thinking,
                 extra=extra,
                 **_mode_args(mode, output_model.__name__, tool_name, grammar),
@@ -272,6 +273,7 @@ def run_tool_loop(
             model=model,
             messages=_with_cache_point(messages, model, ctx),
             max_tokens=max_out,
+            timeout_s=timeout_for(max_out),
             tools=schemas,
             tool_choice="auto",
             thinking=thinking,
@@ -581,12 +583,50 @@ def _inject_meta(model_cls: type[BaseModel], data: dict[str, Any], meta: dict[st
             _inject_meta(ann, data[name], meta)
 
 
+def timeout_for(max_tokens: int) -> float:
+    """Long replies need time to be written (study-3 M11: 32,000 tokens exceed 300 s). Allow about
+    40 output tokens per second plus a margin, never less than 300 s."""
+    return float(max(300, round(120 + max_tokens / 40)))
+
+
+def _decode_strings(data: dict[str, Any], model: type[BaseModel]) -> dict[str, Any]:
+    """Some models send a nested object or list as a JSON string (study-3 M11, offered tool):
+    decode those strings when the field is not itself a string, then validate as usual."""
+    for name, field in model.model_fields.items():
+        value = data.get(name)
+        if field.annotation is str or not isinstance(value, str):
+            if isinstance(value, dict):
+                inner = _model_of(field.annotation)
+                if inner is not None:
+                    data[name] = _decode_strings(value, inner)
+            continue
+        text = value.strip()
+        if text[:1] in "{[":
+            try:
+                decoded = json.loads(text)
+            except ValueError:
+                continue
+            inner = _model_of(field.annotation)
+            data[name] = (
+                _decode_strings(decoded, inner) if inner and isinstance(decoded, dict) else decoded
+            )
+    return data
+
+
+def _model_of(annotation: Any) -> type[BaseModel] | None:
+    for t in (annotation, *getattr(annotation, "__args__", ())):
+        if isinstance(t, type) and issubclass(t, BaseModel):
+            return t
+    return None
+
+
 def _parse[C: BaseModel](
     raw: str | None, output_model: type[C], meta: dict[str, Any], model: str
 ) -> C:
     data = json.loads(_extract_json(raw))
     if not isinstance(data, dict):
         raise ValueError("output must be a JSON object")
+    data = _decode_strings(data, output_model)
     _inject_meta(output_model, data, meta)
     obj = output_model.model_validate(data)
     if isinstance(obj, Contract):

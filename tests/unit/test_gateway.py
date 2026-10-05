@@ -489,3 +489,22 @@ def test_cut_off_replies_say_so_and_stop_after_two(ctx: CallContext, fake: FakeL
     with pytest.raises(ContractViolation, match="output limit"):
         _call(ctx)
     assert fake.pending("long_planner") == 1  # the third call was never made
+
+
+def test_long_outputs_get_a_long_enough_timeout(ctx: CallContext, fake: FakeLLM) -> None:
+    """study-3 M11: a 32,000-token design cannot be written within the default 300 s."""
+    from r2r.llm.gateway import timeout_for
+
+    assert timeout_for(4000) == 300
+    assert timeout_for(32000) >= 900
+    fake.script("long_planner", roadmap())
+    _call(ctx)
+    assert fake.calls[0].timeout_s == timeout_for(fake.calls[0].max_tokens)
+
+
+def test_nested_objects_sent_as_json_strings_are_decoded(ctx: CallContext, fake: FakeLLM) -> None:
+    """study-3 M11: with an offered tool the designer sent `spec` as a JSON string."""
+    data = roadmap().model_dump(mode="json", exclude={"created_by", "run_id", "milestone_id"})
+    data["milestones"] = json.dumps(data["milestones"])  # a list, stringified
+    fake.script("long_planner", json.dumps(data))
+    assert _call(ctx).milestones[0].id == "M1"
