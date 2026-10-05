@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from r2r.contracts import Failure, TestResult
+from r2r.contracts import ContractTooLarge, Failure, TestResult
 from r2r.harness.sandbox import SandboxBackend
 from r2r.harness.workspace import Workspace
 
@@ -172,14 +172,33 @@ def check_code(
                 n_ok += 1
             except SyntaxError as e:
                 failures.append(Failure(test_id=reproduce, message=f"syntax error: {e}"[:300]))
-    return TestResult(
+    return _fit(
+        failures,
         created_by="harness",
         run_id=run_id,
         milestone_id=milestone_id,
         passed=not failures,
         n_passed=n_ok,
         n_failed=len(failures),
-        failures=failures[:MAX_FAILURES],
         frozen_ok=True,
         duration_s=time.monotonic() - start,
     )
+
+
+def _fit(failures: list[Failure], **fields: Any) -> TestResult:
+    """The TestResult within its token cap: tracebacks shortened first, then fewer failures
+    listed (the counts stay exact)."""
+    shown = failures[:MAX_FAILURES]
+    for tail in (2000, 600, 200, 0):
+        trimmed = [f.model_copy(update={"tail": f.tail[-tail:] if tail else ""}) for f in shown]
+        try:
+            return TestResult(failures=trimmed, **fields)
+        except ContractTooLarge:
+            continue
+    while shown:
+        shown = shown[:-1]
+        try:
+            return TestResult(failures=[f.model_copy(update={"tail": ""}) for f in shown], **fields)
+        except ContractTooLarge:
+            continue
+    return TestResult(failures=[], **fields)

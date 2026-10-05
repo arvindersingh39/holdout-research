@@ -116,3 +116,23 @@ def test_benchmark_milestone_needs_its_reproduce_script(ws: Workspace) -> None:
     assert not _check(ws, script).passed  # must at least compile
     (ws.root / script).write_text("print('ok')\n")
     assert _check(ws, script).passed
+
+
+def test_many_long_failures_are_shrunk_to_fit_the_cap(ws: Workspace) -> None:
+    """TestResult has a token cap (budgets.yaml); ten import tracebacks must not overflow it."""
+    for i in range(12):
+        (ws.root / f"src/sq/m{i}.py").write_text(f"raise ImportError('{'x' * 1500}')\n")
+    paths = [f"src/sq/m{i}.py" for i in range(12)]
+    for p in paths:
+        (ws.root / p).write_text(
+            (ws.root / p).read_text() + "def f(a):\n    raise NotImplementedError\n"
+        )
+    stubs = record_stubs(ws.root, paths)
+    for p in paths:  # implement, but every module still fails to import with a long message
+        (ws.root / p).write_text(
+            f"raise ImportError('{'x' * 1500}')\n\n\ndef f(a):\n    return a\n"
+        )
+    r = check_code(
+        ws, LocalProcessBackend(ws), stubs, None, timeout_s=60, run_id="r", milestone_id="M1"
+    )
+    assert not r.passed and r.n_failed == 12 and r.failures  # built, within its cap
