@@ -431,9 +431,10 @@ def test_grammar_schema_has_no_item_counts_but_the_prompt_and_validation_keep_th
         _call(ctx)
 
 
-def test_forced_tool_refusal_falls_back_to_json_text(ctx: CallContext) -> None:
-    """study-3 M9: Sonnet 5.5 with thinking refuses the schema as too complex, then refuses a
-    forced tool call; the schema is in the prompt, so plain JSON text is the last step."""
+def test_forced_tool_refusal_falls_back_to_an_offered_tool(ctx: CallContext) -> None:
+    """study-3 M9-M11: Anthropic refuses the big schema natively, and LiteLLM refuses to force a
+    tool for Sonnet 5.5 (locally, before any API call). The last step offers the submit tool with
+    tool_choice="auto": every provider accepts it, with or without thinking."""
     from r2r.llm import gateway
     from r2r.llm.client import LLMCallError
 
@@ -446,17 +447,32 @@ def test_forced_tool_refusal_falls_back_to_json_text(ctx: CallContext) -> None:
     )
     model = ctx.settings.models.roles["long_planner"].model
     gateway._SCHEMA_REJECTED.discard(model)
-    gateway._TEXT_ONLY.discard(model)
+    gateway._TOOL_AUTO.discard(model)
     fake.script("long_planner", too_complex, no_forced, roadmap(), roadmap())
     assert _call(ctx).goal == roadmap().goal
-    native, tool, text = fake.calls
+    native, forced, offered = fake.calls
     assert native.response_format is not None
-    assert tool.tools is not None and tool.tool_choice
-    assert text.response_format is None and text.tools is None and text.tool_choice is None
-    _call(ctx)  # remembered: straight to text
-    assert fake.calls[3].response_format is None and fake.calls[3].tools is None
+    assert forced.tool_choice == {"type": "function", "function": {"name": "submit_roadmap"}}
+    assert offered.tools and offered.tool_choice == "auto" and offered.response_format is None
+    assert "submit_roadmap" in offered.messages[-1]["content"]  # told to call it
+    _call(ctx)  # remembered for this model: straight to the offered tool
+    assert fake.calls[3].tool_choice == "auto"
     gateway._SCHEMA_REJECTED.discard(model)
-    gateway._TEXT_ONLY.discard(model)
+    gateway._TOOL_AUTO.discard(model)
+
+
+def test_offered_tool_answered_in_text_is_still_parsed(ctx: CallContext) -> None:
+    from r2r.llm import gateway
+
+    fake = FakeLLM(native_schema=True)
+    ctx = CallContext(**{**ctx.__dict__, "client": fake})
+    model = ctx.settings.models.roles["long_planner"].model
+    gateway._TOOL_AUTO.add(model)
+    fake.script("long_planner", "Here it is:\n```json\n" + roadmap().model_dump_json() + "\n```")
+    try:
+        assert _call(ctx).goal == roadmap().goal
+    finally:
+        gateway._TOOL_AUTO.discard(model)
 
 
 def test_cut_off_replies_say_so_and_stop_after_two(ctx: CallContext, fake: FakeLLM) -> None:

@@ -97,8 +97,8 @@ def call_structured[C: BaseModel](
         _user_message(payload),
     ]
 
-    if model in _TEXT_ONLY:
-        mode = "text"
+    if model in _TOOL_AUTO:
+        mode = "auto"
     elif ctx.client.supports_response_schema(model) and model not in _SCHEMA_REJECTED:
         mode = "native"
     else:
@@ -111,11 +111,11 @@ def call_structured[C: BaseModel](
     cut_offs = 0
     attempts = ctx.settings.budgets.structured_attempts
     for attempt in range(1, attempts + 1):
-        while True:  # step down native → forced tool → JSON text while the provider refuses
+        while True:  # step down native → forced tool → offered tool while the provider refuses
             req = LLMRequest(
                 role=role,
                 model=model,
-                messages=list(messages),
+                messages=[*messages, *_mode_messages(mode, tool_name)],
                 max_tokens=max_out,
                 thinking=thinking,
                 extra=extra,
@@ -129,14 +129,15 @@ def call_structured[C: BaseModel](
                     # strict providers (OpenAI) and Anthropic's grammar limit refuse the schema;
                     # a forced tool call carries the same schema without that rule
                     _SCHEMA_REJECTED.add(model)
-                    log.warning("schema rejected; using a forced tool call", extra={"model": model})
+                    log.info("schema rejected; using a forced tool call", extra={"model": model})
                     mode = "tool"
                 elif mode == "tool" and _is_forced_tool_refusal(e):
-                    # e.g. Anthropic with thinking: no forced tool use. The schema is in the
-                    # prompt, so the answer comes back as JSON text and is validated as usual
-                    _TEXT_ONLY.add(model)
-                    log.warning("forced tool refused; asking for JSON text", extra={"model": model})
-                    mode = "text"
+                    # e.g. LiteLLM for Sonnet 5.5, or Anthropic with thinking: no forced tool.
+                    # Offering the tool (tool_choice="auto") is accepted everywhere; a text
+                    # answer is still parsed as JSON. Remembered per model for this process.
+                    _TOOL_AUTO.add(model)
+                    log.info("forced tool refused; offering the tool", extra={"model": model})
+                    mode = "auto"
                 else:
                     raise
         native = mode != "tool"
@@ -173,7 +174,7 @@ def call_structured[C: BaseModel](
 
 
 _SCHEMA_REJECTED: set[str] = set()  # models whose provider refused our response_format schema
-_TEXT_ONLY: set[str] = set()  # ... and that refuse forced tool calls too: plain JSON text
+_TOOL_AUTO: set[str] = set()  # ... and that refuse forced tool calls too: offer the tool
 
 
 def _is_schema_rejection(e: Exception) -> bool:
@@ -203,10 +204,21 @@ def _is_forced_tool_refusal(e: Exception) -> bool:
     return "forced tool use" in msg or ("tool_choice" in msg and "not support" in msg)
 
 
+AUTO_NOTE = "Answer by calling the {tool} tool once, with the complete object as its arguments."
+
+
 def _mode_args(mode: str, name: str, tool_name: str, schema: Any) -> dict[str, Any]:
-    if mode == "text":
-        return {}  # the schema is in the system prompt; the reply is parsed as JSON text
-    return _structured_args(mode == "native", name, tool_name, schema)
+    args = _structured_args(mode == "native", name, tool_name, schema)
+    if mode == "auto":
+        args["tool_choice"] = "auto"
+    return args
+
+
+def _mode_messages(mode: str, tool_name: str) -> list[dict[str, Any]]:
+    """An offered (not forced) tool needs one line asking for it."""
+    if mode != "auto":
+        return []
+    return [{"role": "user", "content": AUTO_NOTE.format(tool=tool_name)}]
 
 
 def _structured_args(native: bool, name: str, tool_name: str, schema: Any) -> dict[str, Any]:
