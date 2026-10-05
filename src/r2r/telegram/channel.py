@@ -17,9 +17,11 @@ BUTTONS = [
     [("Approve", "approve"), ("Redirect", "redirect")],
     [("Stop", "stop"), ("Quit for now", "quit")],
 ]
+PATH_ROW = [("Other path", "path")]  # D93: approve with a results file the owner names
 NOTE_PROMPT = {
     "redirect": "Reply with a one-line note for the long-term planner.",
     "stop": "Reply with the reason for stopping (or '-' for none).",
+    "path": "Reply with the results file path (relative to the workspace, or absolute).",
 }
 
 
@@ -41,7 +43,8 @@ class TelegramChannel:
         text = f"r2r · run {run_id}\n{req.title}\n\n" + (
             body[:TEXT_CHARS].rsplit("\n", 1)[0] + "\n…\n(full text attached)" if cut else body
         )
-        buttons = [[(label, f"{nonce}:{action}") for label, action in row] for row in BUTTONS]
+        rows = [*BUTTONS, PATH_ROW] if req.path_prompt else BUTTONS
+        buttons = [[(label, f"{nonce}:{action}") for label, action in row] for row in rows]
         message_id = self.client.send_message(self.chat_id, text, buttons=buttons)
         if cut:
             self.client.send_document(self.chat_id, "gate.md", req.markdown.encode(), req.title)
@@ -68,7 +71,7 @@ class TelegramChannel:
                             self.chat_id, f"Left pending. Continue with: r2r resume {run_id}"
                         )
                         return None
-                    if action in NOTE_PROMPT:
+                    if action in NOTE_PROMPT and (action != "path" or req.path_prompt):
                         waiting_for = action
                         self.client.send_message(
                             self.chat_id, NOTE_PROMPT[action], force_reply=True
@@ -81,7 +84,8 @@ class TelegramChannel:
                 if waiting_for is None or not note:
                     continue
                 self.client.clear_buttons(self.chat_id, message_id)
-                return _decision(run_id, waiting_for, "" if note == "-" else note)
+                action = "approve" if waiting_for == "path" else waiting_for
+                return _decision(run_id, action, "" if note == "-" else note)
 
 
 def _decision(run_id: str, action: str, note: str = "") -> HumanDecision:

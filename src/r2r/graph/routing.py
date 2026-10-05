@@ -7,18 +7,7 @@ from typing import Literal
 from r2r.contracts import CoordinatorVerdict, HumanDecision, Issue, Milestone, ResultDigest, Roadmap
 
 END = "__end__"
-GateKind = Literal[
-    "roadmap",
-    "escalation",
-    "tests",
-    "design",
-    "coder",
-    "tamper",
-    "budget",
-    "dispute",
-    "result",
-    "publication",
-]
+GateKind = Literal["roadmap", "coder", "benchmark", "budget", "result", "publication"]
 _FINISHED = {"done", "skipped"}
 
 
@@ -89,18 +78,20 @@ def keep_finished(old: Roadmap | None, new: Roadmap) -> Roadmap:
 
 
 def is_material_change(old: Roadmap | None, new: Roadmap) -> bool:
-    """Milestones added, removed or reordered, or the goal changed."""
+    """Milestones added, removed or reordered, the goal changed, or benchmarks reassigned (D93:
+    the owner confirms which values each milestone must reproduce)."""
     if old is None:
         return True
-    return old.goal != new.goal or [m.id for m in old.milestones] != [m.id for m in new.milestones]
+    if old.goal != new.goal or [m.id for m in old.milestones] != [m.id for m in new.milestones]:
+        return True
+    return [m.benchmarks for m in old.milestones] != [m.benchmarks for m in new.milestones]
 
 
 def route_after_coordinator(verdict: CoordinatorVerdict, rounds: int, max_rounds: int) -> str:
-    """`rounds` counts revise verdicts so far for this milestone, including this one."""
-    if verdict.verdict == "pass":
-        return "scout"
-    if rounds > max_rounds:
-        return "escalation_gate"
+    """`rounds` counts revise verdicts so far for this milestone, including this one. Past the
+    limit the spec goes to the designer with the open issues as notes (D93: no escalation gate)."""
+    if verdict.verdict == "pass" or rounds > max_rounds:
+        return "design"
     if any(i.target == "roadmap" for i in verdict.issues):
         return "long_plan"
     return "short_plan"
@@ -110,48 +101,25 @@ def route_after_gate(gate: GateKind, decision: HumanDecision) -> str:
     if decision.action == "stop":
         return END
     if decision.action == "redirect":
-        return "design" if gate == "tests" else "long_plan"
+        return "long_plan"
     return {
         "roadmap": "short_plan",
-        "escalation": "scout",
-        "dispute": "revise_test",
-        "tests": "freeze",
-        "design": "freeze",
         "coder": "digest",
-        "tamper": "code",
+        "benchmark": "compare",
         "result": "long_plan",
         "publication": END,
     }[gate]
 
 
-def needs_test_review(review_tests: str, roadmap: Roadmap) -> bool:
-    if review_tests == "always":
-        return True
-    if review_tests == "never":
-        return False
-    return not any(m.status == "done" for m in roadmap.milestones)  # first_milestone
-
-
-def route_after_design(redgreen_ok: bool, failed_attempts: int, review: bool) -> str:
-    """One automatic redesign; a second failure goes to the human design gate."""
-    if redgreen_ok:
-        return "tests_gate" if review else "freeze"
-    return "design" if failed_attempts < 2 else "design_gate"
-
-
-def route_after_code(
-    tampered: bool, passed: bool, sessions: int, max_sessions: int, disputed: bool = False
-) -> str:
-    if tampered:
-        return "tamper_gate"
+def route_after_code(passed: bool, sessions: int, max_sessions: int, has_benchmarks: bool) -> str:
     if passed:
-        return "opt_baseline"
-    if disputed:
-        return "dispute_gate"
+        return "benchmark_gate" if has_benchmarks else "digest"
     return "code" if sessions < max_sessions else "coder_gate"
 
 
-def route_after_optimize(tampered: bool, stop_reason: str | None) -> str:
-    if tampered:
-        return "tamper_gate"
-    return "digest" if stop_reason else "optimize"
+def route_after_compare(status: str | None, retry: bool) -> str:
+    """The owner's results file: unusable → ask again; wrong values → the coder (bounded by
+    `max_fix_rounds`); otherwise the digest reports the comparison."""
+    if status is None:
+        return "benchmark_gate"
+    return "code" if retry else "digest"

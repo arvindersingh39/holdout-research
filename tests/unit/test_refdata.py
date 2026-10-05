@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from r2r.harness.refdata import DATA_DIR, RefDataError, describe, install, snapshot
+from r2r.harness.refdata import RefDataError, snapshot
 from r2r.harness.workspace import Workspace
 from r2r.settings import load_settings
 from r2r.store.runs import run_paths
@@ -48,15 +48,11 @@ def test_oversized_file_fails_loudly(tmp_path: Path) -> None:
         snapshot(prop, tmp_path / "run", LIM)
 
 
-def test_install_into_frozen_dir_and_describe(tmp_path: Path) -> None:
+def test_data_never_enters_the_workspace(tmp_path: Path) -> None:
+    """D93: the coder sees benchmark refs only; the recorded values stay in the run folder."""
     prop = _proposal(tmp_path, **{"recorded.json": '{"a": 1}'})
     paths = run_paths("run-test", base=tmp_path, create=True)
     ws = Workspace.create(paths)
     snapshot(prop, paths.root, LIM)
-    rels = install(ws, paths.root)
-    assert rels == [f"{DATA_DIR}/recorded.json"] and DATA_DIR == "tests/frozen/data"
-    assert (ws.root / DATA_DIR / "recorded.json").read_text() == '{"a": 1}'
-    assert install(ws, paths.root) == rels  # idempotent
-    short = describe(paths.root, max_chars=5)[f"{DATA_DIR}/recorded.json"]
-    assert short.startswith('{"a"') and "truncated" in short
-    assert describe(paths.root, max_chars=1000) == {f"{DATA_DIR}/recorded.json": '{"a": 1}'}
+    assert (paths.root / "data/recorded.json").is_file()
+    assert not any(p.name == "recorded.json" for p in ws.root.rglob("*"))

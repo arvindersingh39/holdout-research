@@ -1,6 +1,7 @@
-"""Builds the graph (PLAN.md §2) and opens it with the SQLite checkpointer.
+"""Builds the graph (PLAN.md §2; D93 lean flow) and opens it with the SQLite checkpointer.
 
-The optimizer loop (Phase 6) slots in between `code` and `digest`.
+retrieve → long_plan → (roadmap gate) → short_plan ⇄ coordinate → design → code ⇄ stub check →
+[benchmark gate → compare] → digest → result gate → long_plan (no model call when met).
 """
 
 from __future__ import annotations
@@ -21,47 +22,36 @@ from r2r.graph import nodes
 from r2r.graph.deps import RunDeps
 from r2r.graph.routing import (
     GateKind,
-    needs_test_review,
     next_milestone,
     route_after_code,
+    route_after_compare,
     route_after_coordinator,
-    route_after_design,
     route_after_gate,
-    route_after_optimize,
 )
 from r2r.graph.state import PipelineState
 from r2r.llm.gateway import BudgetExceeded
 
 GATES: dict[GateKind, Callable] = {
     "roadmap": nodes.roadmap_gate,
-    "escalation": nodes.escalation_gate,
-    "tests": nodes.tests_gate,
-    "design": nodes.design_gate,
     "coder": nodes.coder_gate,
-    "tamper": nodes.tamper_gate,
+    "benchmark": nodes.benchmark_gate,
     "budget": nodes.budget_gate,
-    "dispute": nodes.dispute_gate,
     "result": nodes.result_gate,
     "publication": nodes.publication_gate,
 }
 
-# Nodes that call an LLM: a BudgetExceeded there routes to the budget gate (D46). The optimizer
-# loop handles its own budget stop (D40).
+# Nodes that call an LLM: a BudgetExceeded there routes to the budget gate (D46).
 GUARDED = (
     "retrieve",
     "long_plan",
     "short_plan",
     "coordinate",
-    "scout",
     "design",
     "code",
-    "revise_test",
     "digest",
     "publish",
     "oversee_plan",
     "oversee_design",
-    "oversee_design_gate",
-    "oversee_tests",
     "oversee_code",
     "oversee_result",
 )
@@ -69,10 +59,8 @@ GUARDED = (
 # Phase 7c: where Python routes through the overseer, and where each hook continues.
 HOOKS = {
     "roadmap_gate": "oversee_plan",
-    "design": "oversee_design",
-    "design_gate": "oversee_design_gate",  # the owner decides after two failed designs
-    "tests_gate": "oversee_tests",  # autopilot only: someone must read the tests (D76)
-    "code": "oversee_code",
+    "code": "oversee_design",  # after a usable design, before the first coder session
+    "coder_gate": "oversee_code",  # the coder is stuck: advice for the owner and the coder
     "result_gate": "oversee_result",
 }
 
@@ -100,15 +88,13 @@ def _after_budget_gate(state: PipelineState) -> str:
     return state.get("budget_retry") or "long_plan"
 
 
-def _via_overseer(
-    route: Callable[[PipelineState], str], src: str, lim, autopilot: bool = False
-) -> Callable:
+def _via_overseer(route: Callable[[PipelineState], str], src: str, lim) -> Callable:
     """Send `src`'s next step through its overseer hook when enabled and under the call cap.
     Only the hook's own edge returns to the original target: the overseer never routes."""
     hooked = {
         "long_plan": {"roadmap_gate"},
-        "design": {"design", "design_gate", *({"tests_gate"} if autopilot else set())},
-        "code": {"code"},
+        "design": {"code"},
+        "code": {"coder_gate"},
         "digest": {"result_gate"},
     }[src]
 
@@ -118,26 +104,6 @@ def _via_overseer(
         return HOOKS[target] if on and target in hooked else target
 
     return r
-
-
-def _via_verify(route: Callable[[PipelineState], str], enabled: bool) -> Callable:
-    """Phase 7d: passing code is verified before simplifying, and again before the digest only
-    if the simplifier changed the code (D86)."""
-
-    def r(state: PipelineState) -> str:
-        target = route(state)
-        if not enabled:
-            return target
-        if target == "opt_baseline":
-            return "verify_code"
-        changed = any(o.accepted for o in state.get("opt_outcomes") or [])
-        return "verify_final" if target == "digest" and changed else target
-
-    return r
-
-
-def _after_verify_code(state: PipelineState) -> str:
-    return "code" if state.get("verify_retry") else "opt_baseline"
 
 
 def _after_long_plan(state: PipelineState) -> str:
@@ -152,35 +118,26 @@ def _after_coordinate(state: PipelineState, max_rounds: int) -> str:
     return route_after_coordinator(state["verdict"], state.get("revise_rounds", 0), max_rounds)
 
 
-def _after_design(state: PipelineState, review_tests: str) -> str:
-    review = needs_test_review(review_tests, state["roadmap"])
-    return route_after_design(
-        state.get("redgreen_ok", False), state.get("design_attempts", 0), review
-    )
+def _after_design(state: PipelineState) -> str:
+    if state.get("design_ok"):
+        return "code"
+    return "long_plan" if state.get("human_note") else "design"
 
 
 def _after_code(state: PipelineState, max_sessions: int) -> str:
     result = state.get("test_result")
+    m = next_milestone(state["roadmap"])
     return route_after_code(
-        bool(state.get("tamper")),
         bool(result and result.passed),
         state.get("coder_sessions", 0),
         max_sessions,
-        disputed=bool(state.get("dispute")),
+        has_benchmarks=bool(m is not None and m.benchmarks),
     )
 
 
-def _after_revise(state: PipelineState) -> str:
-    ok = state.get("dispute_file") is None and not state.get("coder_message")
-    return "code" if ok else "coder_gate"
-
-
-def _after_opt_baseline(state: PipelineState) -> str:
-    return "digest" if state.get("opt_stop_reason") else "optimize"
-
-
-def _after_optimize(state: PipelineState) -> str:
-    return route_after_optimize(bool(state.get("tamper")), state.get("opt_stop_reason"))
+def _after_compare(state: PipelineState) -> str:
+    rep = state.get("verification")
+    return route_after_compare(None if rep is None else rep.status, bool(state.get("verify_retry")))
 
 
 def _after_publication(state: PipelineState) -> str:
@@ -202,18 +159,12 @@ def build_graph(deps: RunDeps) -> StateGraph:
         "long_plan": nodes.long_plan,
         "short_plan": nodes.short_plan,
         "coordinate": nodes.coordinate,
-        "scout": nodes.scout,
         "design": nodes.design,
-        "revise_test": nodes.revise_test,
-        "freeze": nodes.freeze_tests,
         "code": nodes.code,
-        "opt_baseline": nodes.opt_baseline,
-        "optimize": nodes.optimize,
+        "compare": nodes.compare,
         "digest": nodes.digest,
-        "verify_code": nodes.verify_code,
-        "verify_final": nodes.verify_final,
         **{
-            hook: partial(nodes.oversee, point=hook.removeprefix("oversee_"))  # e.g. design_gate
+            hook: partial(nodes.oversee, point=hook.removeprefix("oversee_"))
             for hook in HOOKS.values()
         },
         "finish": nodes.finish,
@@ -233,7 +184,6 @@ def build_graph(deps: RunDeps) -> StateGraph:
 
     b = deps.settings.budgets
     ov = b.overseer
-    ver = b.verify.enabled
     for target, hook in HOOKS.items():
         edge(hook, lambda s, t=target: t, [target])
     g.add_edge(START, "retrieve")
@@ -251,57 +201,19 @@ def build_graph(deps: RunDeps) -> StateGraph:
     edge(
         "coordinate",
         partial(_after_coordinate, max_rounds=b.coordinator_max_revise_rounds),
-        ["scout", "short_plan", "long_plan", "escalation_gate"],
+        ["design", "short_plan", "long_plan"],
     )
-    edge("scout", lambda s: "design", ["design"])
     edge(
         "design",
-        _via_overseer(
-            partial(_after_design, review_tests=b.gates.review_tests),
-            "design",
-            ov,
-            autopilot=b.autopilot.enabled,
-        ),
-        [
-            "tests_gate",
-            "freeze",
-            "design",
-            "design_gate",
-            "oversee_design",
-            "oversee_design_gate",
-            "oversee_tests",
-        ],
+        _via_overseer(_after_design, "design", ov),
+        ["code", "design", "long_plan", "oversee_design"],
     )
-    g.add_edge("freeze", "code")
     edge(
         "code",
-        _via_verify(
-            _via_overseer(partial(_after_code, max_sessions=b.coder_max_sessions), "code", ov),
-            ver,
-        ),
-        [
-            "tamper_gate",
-            "opt_baseline",
-            "verify_code",
-            "dispute_gate",
-            "code",
-            "coder_gate",
-            "oversee_code",
-        ],
+        _via_overseer(partial(_after_code, max_sessions=b.coder_max_sessions), "code", ov),
+        ["benchmark_gate", "digest", "code", "coder_gate", "oversee_code"],
     )
-    g.add_conditional_edges("verify_code", _after_verify_code, ["code", "opt_baseline"])
-    g.add_edge("verify_final", "digest")
-    edge("revise_test", _after_revise, ["code", "coder_gate"])
-    edge(
-        "opt_baseline",
-        _via_verify(_after_opt_baseline, ver),
-        ["digest", "verify_final", "optimize"],
-    )
-    edge(
-        "optimize",
-        _via_verify(_after_optimize, ver),
-        ["tamper_gate", "digest", "verify_final", "optimize"],
-    )
+    g.add_conditional_edges("compare", _after_compare, ["benchmark_gate", "code", "digest"])
     edge(
         "digest",
         _via_overseer(lambda s: "result_gate", "digest", ov),
@@ -309,12 +221,8 @@ def build_graph(deps: RunDeps) -> StateGraph:
     )
     targets = {
         "roadmap": ["short_plan", "long_plan", END],
-        "escalation": ["scout", "long_plan", END],
-        "dispute": ["revise_test", "long_plan", END],
-        "tests": ["freeze", "design", END],
-        "design": ["freeze", "long_plan", END],
         "coder": ["digest", "long_plan", END],
-        "tamper": ["code", "long_plan", END],
+        "benchmark": ["compare", "long_plan", END],
         "result": ["long_plan", END],
     }
     for kind, dests in targets.items():

@@ -76,67 +76,38 @@ def test_route_after_coordinator() -> None:
             ],
         }
     )
-    assert route_after_coordinator(passed, rounds=0, max_rounds=2) == "scout"
-    assert route_after_coordinator(passed, rounds=2, max_rounds=2) == "scout"
+    assert route_after_coordinator(passed, rounds=0, max_rounds=2) == "design"
+    assert route_after_coordinator(passed, rounds=2, max_rounds=2) == "design"
     assert route_after_coordinator(revise, rounds=1, max_rounds=2) == "short_plan"
     assert route_after_coordinator(on_roadmap, rounds=1, max_rounds=2) == "long_plan"
-    assert route_after_coordinator(revise, rounds=3, max_rounds=2) == "escalation_gate"
+    # D93: no escalation gate: past the limit the designer gets the open issues as notes
+    assert route_after_coordinator(revise, rounds=3, max_rounds=2) == "design"
 
 
 def test_route_after_gate() -> None:
     assert route_after_gate("roadmap", _decision("approve")) == "short_plan"
     assert route_after_gate("roadmap", _decision("edit", edited=roadmap())) == "short_plan"
     assert route_after_gate("roadmap", _decision("redirect", note="split M1")) == "long_plan"
-    assert route_after_gate("escalation", _decision("approve")) == "scout"
-    assert route_after_gate("escalation", _decision("redirect", note="x")) == "long_plan"
     assert route_after_gate("result", _decision("approve")) == "long_plan"
     assert route_after_gate("result", _decision("redirect", note="x")) == "long_plan"
-    assert route_after_gate("tests", _decision("approve")) == "freeze"
-    assert route_after_gate("tests", _decision("redirect", note="x")) == "design"
-    assert route_after_gate("design", _decision("approve")) == "freeze"
-    assert route_after_gate("design", _decision("redirect", note="x")) == "long_plan"
     assert route_after_gate("coder", _decision("approve")) == "digest"
-    assert route_after_gate("tamper", _decision("approve")) == "code"
-    for gate in (
-        "roadmap",
-        "escalation",
-        "tests",
-        "design",
-        "coder",
-        "tamper",
-        "dispute",
-        "result",
-    ):
+    assert route_after_gate("benchmark", _decision("approve")) == "compare"
+    assert route_after_gate("benchmark", _decision("redirect", note="x")) == "long_plan"
+    for gate in ("roadmap", "coder", "benchmark", "result"):
         assert route_after_gate(gate, _decision("stop")) == END
 
 
-def test_route_after_design_and_code() -> None:
-    from r2r.graph.routing import needs_test_review, route_after_code, route_after_design
+def test_route_after_code_and_compare() -> None:
+    from r2r.graph.routing import route_after_code, route_after_compare
 
-    assert route_after_design(True, 0, review=True) == "tests_gate"
-    assert route_after_design(True, 1, review=False) == "freeze"
-    assert route_after_design(False, 1, review=True) == "design"  # one automatic redesign
-    assert route_after_design(False, 2, review=True) == "design_gate"
-    assert route_after_code(True, True, 1, 3) == "tamper_gate"
-    assert route_after_code(False, True, 1, 3) == "opt_baseline"
-    assert route_after_code(False, False, 2, 3) == "code"
-    assert route_after_code(False, False, 3, 3) == "coder_gate"
-    assert route_after_code(False, False, 1, 3, disputed=True) == "dispute_gate"
-    assert route_after_gate("dispute", _decision("approve")) == "revise_test"
-    assert route_after_gate("dispute", _decision("redirect", note="x")) == "long_plan"
-    from r2r.graph.routing import route_after_optimize
-
-    assert route_after_optimize(True, None) == "tamper_gate"
-    assert route_after_optimize(False, "patience") == "digest"
-    assert route_after_optimize(False, None) == "optimize"
-    rm = roadmap()
-    assert needs_test_review("first_milestone", rm)
-    assert not needs_test_review("first_milestone", mark_done(rm, "M1"))
-    assert needs_test_review("always", mark_done(rm, "M1"))
-    assert not needs_test_review("never", rm)
-
-
-# --- leak 3: a met result with nothing to change advances without a replan ---------------------
+    assert route_after_code(True, 1, 3, has_benchmarks=False) == "digest"
+    assert route_after_code(True, 1, 3, has_benchmarks=True) == "benchmark_gate"
+    assert route_after_code(False, 2, 3, has_benchmarks=True) == "code"
+    assert route_after_code(False, 3, 3, has_benchmarks=False) == "coder_gate"
+    assert route_after_compare(None, False) == "benchmark_gate"  # unusable results file
+    assert route_after_compare("mismatch", True) == "code"
+    assert route_after_compare("mismatch", False) == "digest"  # fix rounds used up
+    assert route_after_compare("verified", False) == "digest"
 
 
 def _met(status: str = "met", mid: str = "M1"):
@@ -180,33 +151,6 @@ def test_replan_when_anything_needs_the_planner() -> None:
 
 
 # --- D86: the final verifier pass runs only if the simplifier changed the code -----------------
-
-
-def test_final_verify_only_after_an_accepted_simplification() -> None:
-    from r2r.contracts import OptimizationOutcome
-    from r2r.graph.build import _via_verify
-
-    def outcome(accepted: bool) -> OptimizationOutcome:
-        return OptimizationOutcome(
-            created_by="harness",
-            run_id="r",
-            milestone_id="M1",
-            attempt=1,
-            accepted=accepted,
-            reason="x",
-            runtime_before_s=1.0,
-            sloc_before=10,
-        )
-
-    to_digest = _via_verify(lambda s: "digest", enabled=True)
-    assert to_digest({"opt_outcomes": []}) == "digest"
-    assert to_digest({"opt_outcomes": [outcome(False)]}) == "digest"
-    assert to_digest({"opt_outcomes": [outcome(False), outcome(True)]}) == "verify_final"
-    assert _via_verify(lambda s: "opt_baseline", enabled=True)({}) == "verify_code"
-    assert (
-        _via_verify(lambda s: "digest", enabled=False)({"opt_outcomes": [outcome(True)]})
-        == "digest"
-    )
 
 
 def test_current_milestone_moves_off_a_finished_one() -> None:

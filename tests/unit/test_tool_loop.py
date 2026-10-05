@@ -114,3 +114,16 @@ def test_tools_sent_in_request(ctx: CallContext, fake: FakeLLM) -> None:
     assert [t["function"]["name"] for t in req.tools] == ["add", "big", "boom"]
     assert req.tool_choice == "auto"
     assert "<data>" in _text(req.messages[1])
+
+
+def test_one_nudge_after_a_reply_without_tools(ctx: CallContext, fake: FakeLLM) -> None:
+    """D93: GPT-style models often announce work in plain text; one nudge brings them back to the
+    tools before the session ends."""
+    fake.script("coder", "I will now implement it.", [tool_call("add", a=1, b=1)], "Done.", "x")
+    res = run_tool_loop(
+        "coder", "coder", milestone_spec(), TOOLS, 6, lambda s: False, ctx, nudge="Use the tools."
+    )
+    assert res.stopped_by == "no_tool_calls" and res.final_text == "Done." and res.turns == 3
+    second = fake.calls[1].messages
+    assert second[-2]["role"] == "assistant" and _text(second[-2]) == "I will now implement it."
+    assert second[-1]["role"] == "user" and "Use the tools." in _text(second[-1])

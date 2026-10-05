@@ -1,9 +1,9 @@
-"""Package mode (Phase 8, D68): an installable package whose frozen tests pass.
+"""Package mode (Phase 8, D68; D93): an installable package with its reproduce scripts.
 
 The wheel is built on the host with `uv build`; hatchling reads only the pyproject we write and
 never imports the generated code. API docs come from parsing the source with `ast` for the same
-reason. The wheel is then installed into a clean, offline sandbox and the frozen tests run
-against the installed copy, not `src/`.
+reason. The wheel is then installed into a clean, offline sandbox and every module of the
+installed copy, not `src/`, must import.
 """
 
 from __future__ import annotations
@@ -18,12 +18,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from r2r.harness.sandbox import SandboxBackend
-from r2r.harness.workspace import FROZEN_DIRS, Workspace
+from r2r.harness.workspace import Workspace
 from r2r.publish.collect import RunRecord
 
 SANDBOX_REQUIREMENTS = Path(__file__).resolve().parents[3] / "sandbox" / "requirements.txt"
 THIRD_PARTY = ("numpy", "scipy", "pandas", "numba", "sympy", "matplotlib")
-TEST_TOOLS = ("pytest", "hypothesis")
 _SKIP = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache")
 CI = """\
 name: tests
@@ -36,8 +35,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install . {tools}
-      - run: pytest -q tests/frozen
+      - run: pip install .
+      - run: python -c "{imports}"
 """
 
 Runner = Callable[[list[str], Path, dict[str, str], float], tuple[int, str]]
@@ -59,7 +58,8 @@ def assemble_package(record: RunRecord, ws: Workspace, out_dir: Path) -> Path:
     pkg_dir = out_dir / "package"
     shutil.rmtree(pkg_dir, ignore_errors=True)
     shutil.copytree(ws.root / "src", pkg_dir / "src", ignore=_SKIP)
-    shutil.copytree(ws.root / "tests" / "frozen", pkg_dir / "tests" / "frozen", ignore=_SKIP)
+    if (ws.root / "bench").is_dir():  # reproduce scripts (D93)
+        shutil.copytree(ws.root / "bench", pkg_dir / "bench", ignore=_SKIP)
     names = packages(pkg_dir / "src")
     if not names:
         raise ValueError("no Python package under src/")
@@ -71,7 +71,7 @@ def assemble_package(record: RunRecord, ws: Workspace, out_dir: Path) -> Path:
     (pkg_dir / "API.md").write_text(api_docs(pkg_dir / "src"))
     wf = pkg_dir / ".github" / "workflows"
     wf.mkdir(parents=True)
-    (wf / "tests.yml").write_text(CI.format(tools=" ".join(TEST_TOOLS)))
+    (wf / "tests.yml").write_text(CI.format(imports="; ".join(f"import {n}" for n in names)))
     return pkg_dir
 
 
@@ -85,6 +85,24 @@ def build_wheel(pkg_dir: Path, runner: Runner | None = None) -> tuple[Path | Non
     return (wheels[-1] if code == 0 and wheels else None), out[-4000:]
 
 
+_IMPORT_ALL = """\
+import importlib, pkgutil, sys
+sys.path.insert(0, "/tmp/site")
+ok = bad = 0
+for name in sys.argv[1:]:
+    pkg = importlib.import_module(name)
+    for m in [name] + [i.name for i in pkgutil.walk_packages(pkg.__path__, name + ".")]:
+        try:
+            importlib.import_module(m)
+            ok += 1
+        except Exception as e:
+            bad += 1
+            sys.stdout.write(f"FAILED import {m}: {type(e).__name__}: {e}\\n")
+sys.stdout.write(f"{ok} imported, {bad} failed\\n")
+sys.exit(1 if bad else 0)
+"""
+
+
 def verify_wheel(
     wheel: Path,
     pkg_dir: Path,
@@ -92,22 +110,19 @@ def verify_wheel(
     verify_dir: Path,
     timeout_s: float = 600,
 ) -> WheelCheck:
-    """Install the wheel alone into a fresh offline sandbox and run the frozen tests on it."""
+    """Install the wheel alone into a fresh offline sandbox and import every module from it."""
     shutil.rmtree(verify_dir, ignore_errors=True)
     (verify_dir / "dist").mkdir(parents=True)
     shutil.copy2(wheel, verify_dir / "dist" / wheel.name)
-    shutil.copytree(pkg_dir / "tests" / "frozen", verify_dir / "tests" / "frozen")
-    for d in FROZEN_DIRS:
-        (verify_dir / d).mkdir(parents=True, exist_ok=True)
     box = sandbox_for(Workspace(verify_dir, verify_dir / ".nogit", verify_dir / ".frozen.json"))
-    script = (
-        f"pip install --quiet --no-deps --no-index --target /tmp/site dist/{wheel.name} && "
-        "PYTHONPATH=/tmp/site python -m pytest -q -p no:cacheprovider tests/frozen"
-    )
-    res = box.run(["sh", "-c", script], timeout_s)
+    names = packages(pkg_dir / "src")
+    install = f"pip install --quiet --no-deps --no-index --target /tmp/site dist/{wheel.name}"
+    # one container run: /tmp (where the wheel is installed) is fresh in every run
+    script = f'{install} && python -c "$0" "$@"'
+    res = box.run(["sh", "-c", script, _IMPORT_ALL, *names], timeout_s)
     out = res.stdout + "\n" + res.stderr
-    n_pass = sum(int(x) for x in re.findall(r"(\d+) passed", out))
-    n_fail = sum(int(x) for x in re.findall(r"(\d+) (?:failed|error)", out))
+    m = re.search(r"(\d+) imported, (\d+) failed", out)
+    n_pass, n_fail = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
     ok = res.exit_code == 0 and not res.timed_out and n_pass > 0 and n_fail == 0
     return WheelCheck(ok, n_pass, n_fail, "\n".join(out.strip().splitlines()[-40:]))
 
@@ -222,18 +237,19 @@ def _readme(record: RunRecord, name: str, title: str) -> str:
             "",
             "## Results",
             "",
-            "Each milestone's acceptance criteria were checked by frozen tests written before the "
-            "code and never edited afterwards (`tests/frozen/`).",
+            "Each milestone was implemented from a written formulation and approved by the owner; "
+            "where the sources report values, they were reproduced with `bench/reproduce_*.py` "
+            "and compared within stated tolerances.",
             "",
             "| Milestone | Title | Status | Criteria passed | Metrics |",
             "|---|---|---|---|---|",
             *rows,
             "",
-            "## Tests",
+            "## Reproduce",
             "",
             "```bash",
-            "pip install . pytest hypothesis",
-            "pytest -q tests/frozen",
+            "pip install .",
+            "python bench/reproduce_<milestone>.py",
             "```",
             "",
         ]

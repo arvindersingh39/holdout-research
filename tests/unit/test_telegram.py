@@ -119,7 +119,7 @@ def test_other_chats_and_stale_buttons_are_ignored() -> None:
 
 
 def test_long_gate_is_cut_and_attached_whole() -> None:
-    long = GateRequest(gate="design", title="Long", markdown="line\n" * 3000)
+    long = GateRequest(gate="result", title="Long", markdown="line\n" * 3000)
     fake = FakeTelegram(press("approve"))
     channel(fake).ask(long, "study-3")
     assert len(fake.sent("sendMessage")[0]["text"]) <= 4096
@@ -186,3 +186,24 @@ def test_cli_chat_id_prints_ids_only(monkeypatch) -> None:
     monkeypatch.setattr(cli, "_telegram_client", lambda: TelegramClient(TOKEN, http=http))
     out = CliRunner().invoke(cli.app, ["telegram", "chat-id"])
     assert out.exit_code == 0 and "TELEGRAM_CHAT_ID=777" in out.output and TOKEN not in out.output
+
+
+def test_benchmark_gate_takes_a_results_path() -> None:
+    """D93: approve reads the default results file; "Other path" asks for one."""
+    req = GateRequest(
+        gate="benchmark", title="M3: run the benchmarks", markdown="run it", path_prompt="File: "
+    )
+    fake = FakeTelegram(press("path"), say("out/m3.json"))
+    d = channel(fake).ask(req, "study-3")
+    assert d is not None and d.action == "approve" and d.note == "out/m3.json"
+    labels = [
+        b["text"]
+        for row in fake.sent("sendMessage")[0]["reply_markup"]["inline_keyboard"]
+        for b in row
+    ]
+    assert "Other path" in labels
+    d = channel(FakeTelegram(press("approve"))).ask(req, "study-3")
+    assert d is not None and d.action == "approve" and d.note == ""
+    plain = FakeTelegram(press("approve"))
+    channel(plain).ask(REQ, "study-3")
+    assert "Other path" not in json.dumps(plain.sent("sendMessage")[0])

@@ -263,9 +263,11 @@ def run_tool_loop(
     ctx: CallContext,
     *,
     model: str | None = None,
+    nudge: str | None = None,
 ) -> ToolLoopResult:
     """Let the model call `tools` until `stop_fn` says done, it stops calling tools, or
-    `max_turns` is reached. One budget check and one ledger row per turn."""
+    `max_turns` is reached. One budget check and one ledger row per turn. With `nudge`, the first
+    reply without a tool call gets that message once instead of ending the loop (D93)."""
     cfg = ctx.settings.models.roles[role]
     model = _resolve_model(role, cfg, model)
     max_out, thinking, extra = _output_limit(cfg, model)
@@ -290,7 +292,14 @@ def run_tool_loop(
         resp = _invoke(req, ctx)
         state.turns += 1
         if not resp.tool_calls:
-            return ToolLoopResult(state.turns, "no_tool_calls", resp.text, state)
+            if nudge is None or state.turns >= max_turns:
+                return ToolLoopResult(state.turns, "no_tool_calls", resp.text, state)
+            messages += [
+                {"role": "assistant", "content": resp.text or "(no reply)"},
+                {"role": "user", "content": nudge},
+            ]
+            nudge = None
+            continue
         messages.append(
             {
                 "role": "assistant",

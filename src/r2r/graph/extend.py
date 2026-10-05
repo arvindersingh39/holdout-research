@@ -2,8 +2,9 @@
 
 The new proposal is ingested into the same run (a new ResearchBrief; identical chunks are not
 re-indexed), the run's proposal folder is updated, and the graph continues at the long planner
-with a note to keep every finished milestone. The workspace, its frozen checks and its history
-stay as they are, so new milestones build on the verified code.
+with a note to keep every finished milestone. The workspace and its history stay as they are, so
+new milestones build on the approved code; the new proposal's benchmarks are added after the
+stored ones (D93).
 """
 
 from __future__ import annotations
@@ -17,12 +18,13 @@ from r2r.agents.retriever import run_retriever
 from r2r.graph.deps import RunDeps
 from r2r.graph.driver import config, open_graph
 from r2r.graph.routing import next_milestone
+from r2r.harness.benchmarks import write_benchmarks
 from r2r.ingest.proposal import ingest_proposal
 
 NOTE = (
     "The owner extended this study with a new proposal (in `proposal`). Keep every finished "
     "milestone exactly as it is and add new milestones after them for the new scope only. The "
-    "finished code is in the workspace with its frozen checks: build on it, never redo it."
+    "finished code is in the workspace: build on it, never redo it."
 )
 
 
@@ -55,6 +57,9 @@ def extend(deps: RunDeps, proposal_dir: Path) -> RunDeps:
     ctx = deps.ctx()
     proposal = ingest_proposal(proposal_dir, deps.blobs, deps.index, ctx)
     brief = run_retriever(proposal, deps.blobs, deps.paths, ctx).brief
+    if brief.benchmarks:
+        added = write_benchmarks(deps.paths.root, brief.benchmarks, keep_existing=True)
+        brief = brief.model_copy(update={"benchmarks": added})
     update = {
         "status": "running",
         "proposal": proposal,

@@ -32,7 +32,6 @@ class RunDeps:
     retry_wait_max_s: float = 20.0
     # Docker in production; the framework tests inject an unisolated backend (D29).
     sandbox_factory: Callable[[Workspace], SandboxBackend] | None = None
-    search_client: Any = None
     # set by open_graph: the run's earlier states, newest first (publishing reads past milestones)
     state_history: Callable[[], Iterable[Mapping[str, Any]]] | None = None
     ledger: Ledger = field(init=False)
@@ -54,21 +53,6 @@ class RunDeps:
         if self.sandbox_factory is not None:
             return self.sandbox_factory(ws)
         return DockerBackend(ws, self.settings.budgets.sandbox)
-
-    def search(self):
-        """Tavily client, or None without a key (D52). Tests set `search_client`."""
-        if self.search_client is not None:
-            return self.search_client
-        key = self.settings.secrets.tavily_api_key
-        if key is None:
-            return None
-        from r2r.search.tavily import TavilyClient
-
-        return TavilyClient(key.get_secret_value())
-
-    def reference_dir(self, milestone_id: str) -> Path:
-        """The reference solution lives here, outside the workspace (D54)."""
-        return self.paths.root / "reference" / milestone_id
 
     def ctx(self, milestone_id: str | None = None, briefing: str | None = None) -> CallContext:
         return CallContext(

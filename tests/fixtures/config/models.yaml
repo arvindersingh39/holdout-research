@@ -13,13 +13,9 @@ roles:
                   thinking_budget: 4000}
   coder:         {model: anthropic/claude-sonnet-5-5,              max_tokens: 8000,
                   escalate_to: anthropic/claude-opus-5-5}  # 8000: D69
-  optimizer:     {model: openrouter/google/gemini-3.8-flash,       max_tokens: 4000,
-                  thinking_budget: 2000}
   digest:        {model: openrouter/google/gemini-3.8-flash,       max_tokens: 300,
                   thinking_budget: 512}  # deviations note only
   writer:        {model: anthropic/claude-opus-5-5,                max_tokens: 6000}
-  scout:         {model: openrouter/google/gemini-3.8-flash,       max_tokens: 4000,
-                  thinking_budget: 1024}  # test baselines from the web (D55)
   overseer:      {model: anthropic/claude-opus-5-5,                max_tokens: 2000,
                   thinking_budget: 2000}  # briefings for the other agents (D62)
 embeddings:      {model: local/all-MiniLM-L6-v2}   # Chroma's built-in ONNX model; no API, no torch

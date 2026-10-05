@@ -107,6 +107,7 @@ SHOWABLE = (
     "verdict",
     "math_spec",
     "test_result",
+    "verification",
     "digest",
     "oversight",
     "decisions",

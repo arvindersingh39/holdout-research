@@ -28,10 +28,8 @@ ROLES = (
     "coordinator",
     "math_designer",
     "coder",
-    "optimizer",
     "digest",
     "writer",
-    "scout",
     "overseer",
 )
 
@@ -115,13 +113,6 @@ class ContextPackLimits(_Strict):
     full_proposal_tokens: PositiveInt  # a proposal this short goes to planners/designer in full
 
 
-class BaselineLimits(_Strict):
-    enabled: bool
-    max_queries: PositiveInt
-    max_pages: PositiveInt
-    page_tokens: PositiveInt
-
-
 class OverseerLimits(_Strict):
     """Phase 7c (D64): the advisor that writes evidence-cited briefings for the other agents."""
 
@@ -139,7 +130,6 @@ class ReferenceDataLimits(_Strict):
 
     dir: str  # folder inside the proposal
     max_file_kb: PositiveInt
-    agent_chars: PositiveInt  # cap per file shown to the designer and overseer
 
 
 class AutopilotConfig(_Strict):
@@ -148,12 +138,7 @@ class AutopilotConfig(_Strict):
     enabled: bool
     roadmap_first: Literal["human", "auto"]
     publication: Literal["human", "auto"]
-    max_auto_redirects: Annotated[int, Field(ge=0)]  # per milestone, then a human gate
-    max_fix_rounds: Annotated[int, Field(ge=0)]  # verification mismatches sent back to the coder
-
-
-class VerifyConfig(_Strict):
-    enabled: bool
+    max_fix_rounds: Annotated[int, Field(ge=0)]  # benchmark mismatches sent back to the coder
 
 
 class PublishLimits(_Strict):
@@ -181,7 +166,6 @@ class GatesConfig(_Strict):
     channel: Literal["cli", "whatsapp", "telegram"]
     approve_first_roadmap: bool
     roadmap_changes: Literal["material_only", "always"]
-    review_tests: Literal["always", "first_milestone", "never"]
     remind_after_h: PositiveFloat
     max_reminders: Annotated[int, Field(ge=0)]
     full_text: Literal["attach", "summary_only"]
@@ -195,27 +179,16 @@ class BudgetsConfig(_Strict):
     structured_attempts: Annotated[int, Field(ge=1, le=5)] = 2  # answer + repairs per call
     max_criteria_per_milestone: Annotated[int, Field(ge=1, le=12)] = 5  # unfinished milestones
     coder_max_turns: PositiveInt
-    coder_escalate_after: PositiveInt
+    coder_escalate_after: Annotated[int, Field(ge=0)]  # 0: escalate at once (when escalate_to)
     coder_max_sessions: PositiveInt
-    optimizer_max_attempts: Annotated[int, Field(ge=0)]
-    optimizer_min_gain: Annotated[float, Field(ge=0, lt=1)]
-    optimizer_patience: PositiveInt
-    optimizer_target_runtime_s: PositiveFloat | None = None
-    simplify_min_cut: Annotated[float, Field(gt=0, lt=1)] = 0.03  # D85: complexity cut to accept
-    simplify_runtime_guard: Annotated[float, Field(ge=1)] = (
-        1.10  # accepted patch: at most 10% slower
-    )
-    bench_repeats: PositiveInt
     sandbox: SandboxLimits
     ingest: IngestLimits
     context_pack_tokens: ContextPackTokens
     context_pack: ContextPackLimits
-    baselines: BaselineLimits
     overseer: OverseerLimits
     publish: PublishLimits
     reference_data: ReferenceDataLimits
     autopilot: AutopilotConfig
-    verify: VerifyConfig
     gates: GatesConfig
     contract_token_caps: dict[str, PositiveInt]
 

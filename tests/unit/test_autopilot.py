@@ -26,23 +26,21 @@ def facts(**kw) -> Facts:
         run_id="r",
         milestone_id="M1",
         flags=[],
-        redgreen_ok=True,
         tests_passed=True,
-        verification=_ver("verified"),
-        auto_redirects=0,
+        verification=None,
         first_roadmap=False,
-        design_feedback="",
     )
     return Facts(**{**base, **kw})
 
 
 def test_config_defaults() -> None:
     assert not CFG.enabled and CFG.roadmap_first == "human" and CFG.publication == "human"
-    assert CFG.max_auto_redirects == 2 and CFG.max_fix_rounds == 2
+    assert CFG.max_fix_rounds == 2
 
 
-@pytest.mark.parametrize("gate", ["escalation", "coder", "dispute", "tamper", "budget"])
+@pytest.mark.parametrize("gate", ["coder", "benchmark", "budget"])
 def test_always_human(gate: str) -> None:
+    """D93: a stuck coder, a benchmark run (the owner runs it) and money are the owner's."""
     assert decide(gate, facts(), CFG) is None
 
 
@@ -54,50 +52,28 @@ def test_roadmap() -> None:
     assert decide("roadmap", facts(first_roadmap=True), auto_first).action == "approve"
 
 
-def test_tests_gate() -> None:
-    d = decide("tests", facts(flags=[WARN]), CFG)
-    assert d.action == "approve" and d.created_by == "harness" and d.note.startswith("autopilot:")
-    d = decide("tests", facts(flags=[SERIOUS, WARN]), CFG)
-    assert d.action == "redirect" and SERIOUS.text in d.note and WARN.text not in d.note
-    assert decide("tests", facts(flags=[SERIOUS], auto_redirects=2), CFG) is None  # limit
-
-
-def test_design_gate_always_redirects_until_limit() -> None:
-    d = decide("design", facts(redgreen_ok=False, design_feedback="AC2 has no failing test."), CFG)
-    assert d.action == "redirect" and "AC2 has no failing test." in d.note
-    assert decide("design", facts(redgreen_ok=False, auto_redirects=2), CFG) is None
-
-
 @pytest.mark.parametrize(
     ("kw", "approved"),
     [
-        ({}, True),
-        ({"verification": _ver("none")}, True),  # nothing to verify: tests decide
-        ({"verification": _ver("unchecked_only")}, True),
-        ({"verification": _ver("mismatch")}, False),
-        ({"verification": _ver("error")}, False),
+        ({}, True),  # complete code, no benchmarks
+        ({"flags": [WARN]}, True),
         ({"tests_passed": False}, False),
         ({"flags": [SERIOUS]}, False),
+        ({"has_benchmarks": True, "verification": _ver("verified")}, True),
+        ({"has_benchmarks": True, "verification": _ver("mismatch")}, False),
+        ({"has_benchmarks": True, "verification": _ver("error")}, False),
+        ({"has_benchmarks": True, "verification": _ver("unchecked_only")}, False),
+        ({"has_benchmarks": True, "verification": None}, False),
     ],
 )
 def test_result_gate(kw: dict, approved: bool) -> None:
+    """D84/D93: a milestone with values to reproduce is approved only when they were."""
     d = decide("result", facts(**kw), CFG)
     assert (d is not None and d.action == "approve") is approved
-    if not approved:
+    if approved:
+        assert d.note.startswith("autopilot:") and d.created_by == "harness"
+    else:
         assert d is None
-
-
-def test_nothing_checked_when_criteria_cite_recorded_data_goes_to_the_owner() -> None:
-    """D84: 'verified' needs values actually compared when the milestone cites the owner's data."""
-    for status in ("none", "unchecked_only"):
-        assert decide("result", facts(verification=_ver(status), cites_data=True), CFG) is None
-    assert decide("result", facts(cites_data=True), CFG).action == "approve"  # verified
-
-
-def test_unchecked_criteria_go_to_the_owner() -> None:
-    """D87: criteria with no numerical check are judged by the owner, so no automatic approval."""
-    assert decide("result", facts(unchecked=["AC3"]), CFG) is None
-    assert decide("result", facts(unchecked=[]), CFG).action == "approve"
 
 
 def test_publication() -> None:

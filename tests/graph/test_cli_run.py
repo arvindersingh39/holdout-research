@@ -22,7 +22,7 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakeLLM:
     f.script(
         "overseer",
         json.dumps({"point": "plan", "flags": [flag]}),
-        json.dumps({"point": "spec"}),
+        json.dumps({"point": "design"}),
         json.dumps({"point": "result"}),
     )
     monkeypatch.setattr(cli, "make_client", lambda settings: f)
@@ -49,9 +49,8 @@ def test_run_quit_resume_show_status(tmp_path: Path, fake: FakeLLM) -> None:
     assert "Research brief" in _invoke(["show", "c", "brief"], tmp_path)
     assert "AC1 looks loose" in _invoke(["show", "c", "oversight"], tmp_path)  # Phase 7c
 
-    # approve the roadmap and the tests, then stop at the first result gate
-    out = _invoke(["resume", "c"], tmp_path, keys="a\na\ns\nenough for today\n")
-    assert "Review M1's tests before coding" in out
+    # approve the roadmap, then stop at the first result gate
+    out = _invoke(["resume", "c"], tmp_path, keys="a\ns\nenough for today\n")
     assert "Review the result of M1" in out
     assert "stopped" in out
     assert "Milestone spec · M1" in _invoke(["show", "c", "spec"], tmp_path)

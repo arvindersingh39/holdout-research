@@ -67,15 +67,15 @@ def test_deviations_note_when_a_criterion_fails(tmp_path: Path, fake: FakeLLM) -
     fake.script("short_planner", SPEC)
     fake.script("coordinator", PASS)
     fake.script("math_designer", design(1))
-    fake.script("coder", "stuck", "still stuck", "no luck")  # 3 failed sessions → coder gate
+    fake.script("coder", *"abcdef")  # 3 sessions without tool calls (one nudge each) → gate
     fake.script("digest", '{"text": "AC1 fails: square() still raises NotImplementedError."}')
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("approve"), decide("stop"))
+    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
     deps = make_deps(tmp_path, fake)
     with open_graph(deps) as graph:
         res = drive(graph, deps.run_id, ch, start=True)
-    assert ch.gates == ["roadmap", "tests", "coder", "result"]
+    assert ch.gates == ["roadmap", "coder", "result"]
     d = res.state["digest"]
-    assert d.status == "failed"
+    assert d.status == "partial"  # the package imports; square() is still a stub
     assert d.deviations.startswith("AC1 fails: square() still raises NotImplementedError.")
     assert [r.role for r in fake.calls].count("digest") == 1
 
@@ -84,7 +84,7 @@ def test_no_deviations_call_when_all_criteria_pass(tmp_path: Path, fake: FakeLLM
     fake.script("long_planner", ROADMAP)
     script_milestone(fake, 1)
     deps = make_deps(tmp_path, fake)
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+    ch = FakeChannel(decide("approve"), decide("stop"))
     with open_graph(deps) as graph:
         res = drive(graph, deps.run_id, ch, start=True)
     assert res.state["digest"].status == "met"
@@ -115,7 +115,7 @@ def test_roadmap_stays_under_cap_over_five_cycles(tmp_path: Path, fake: FakeLLM)
         script_milestone(fake, n)
     deps = make_deps(tmp_path, fake)
     # an owner note at each result asks for a replan (a met result alone keeps the plan)
-    ch = FakeChannel(decide("approve"), decide("approve"), *[decide("approve", note="go on")] * 5)
+    ch = FakeChannel(decide("approve"), *[decide("approve", note="go on")] * 5)
     with open_graph(deps) as graph:
         res = drive(graph, deps.run_id, ch, start=True)
     assert res.status == "complete"
@@ -138,6 +138,6 @@ def test_crash_between_nodes_then_resume(tmp_path: Path, fake: FakeLLM) -> None:
     deps2 = make_deps(tmp_path, fresh, create=False)
     with open_graph(deps2) as graph:
         assert pending_gate(graph, "g") is None  # crashed mid-way, not at a gate
-        res = drive(graph, "g", FakeChannel(decide("approve"), decide("stop")), start=False)
+        res = drive(graph, "g", FakeChannel(decide("stop")), start=False)
     assert res.state["digest"].status == "met"
     assert fresh.calls[0].role == "short_planner"

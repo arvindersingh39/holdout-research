@@ -33,6 +33,7 @@ class GateRequest(BaseModel):
     markdown: str
     contract_type: str | None = None  # set when the contract can be edited
     contract_json: str | None = None
+    path_prompt: str | None = None  # D93: approve may carry a file path in the note
 
 
 def gate_request(
@@ -88,7 +89,8 @@ class TerminalChannel:
         while True:
             key = self.input(f"{options}: ").strip().lower()[:1]
             if key == "a":
-                return self._decision(run_id, "approve")
+                path = self.input(req.path_prompt).strip()[:NOTE_CHARS] if req.path_prompt else ""
+                return self._decision(run_id, "approve", note=path)
             if key == "q":
                 c.print("Gate left pending. Continue later with `r2r resume " + run_id + "`.")
                 return None

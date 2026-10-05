@@ -25,7 +25,6 @@ from r2r.contracts import (
     ResearchBrief,
     ResultDigest,
     Roadmap,
-    SanityCheck,
     TestResult,
 )
 
@@ -122,9 +121,6 @@ def coordinator_verdict() -> CoordinatorVerdict:
     )
 
 
-SANITY_FILE = "tests/frozen/sanity/test_sanity_bs.py"
-
-
 def math_spec() -> MathSpec:
     return MathSpec(
         created_by="math_designer",
@@ -134,17 +130,7 @@ def math_spec() -> MathSpec:
         algorithm="Evaluate the closed form with scipy.stats.norm.",
         signatures=["bs_call(S, K, T, r, sigma) -> float"],
         tolerances={"price_abs": 1e-8},
-        test_files=[SANITY_FILE],
         bench=BenchSpec(entrypoint="bench/run.py", problem_size="1e6 paths", target_runtime_s=0.5),
-        sanity_checks=[
-            SanityCheck(
-                id="S1",
-                criterion_ids=["AC1"],
-                kind="independent_solver",
-                statement="bs_call agrees with quadrature of the discounted payoff",
-                file=SANITY_FILE,
-            )
-        ],
     )
 
 
@@ -155,7 +141,11 @@ def math_design() -> MathDesign:
         milestone_id="M1",
         spec=math_spec(),
         files=[
-            FileSpec(path=SANITY_FILE, purpose="test", content="def test(): ..."),
+            FileSpec(
+                path="src/bs/core.py",
+                purpose="stub",
+                content="def bs_call(S, K, T, r, sigma):\n    raise NotImplementedError\n",
+            ),
             FileSpec(path="bench/run.py", purpose="bench", content="print('bench')"),
         ],
     )

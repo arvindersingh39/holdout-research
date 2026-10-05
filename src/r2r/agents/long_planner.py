@@ -6,6 +6,8 @@ finished, so history is never appended and status stays code-owned.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic import BaseModel
 
 from r2r.contracts import Issue, ResearchBrief, ResultDigest, Roadmap
@@ -22,6 +24,7 @@ class LongPlanInput(BaseModel):
     human_note: str | None = None
     coordinator_issues: list[Issue] = []
     proposal: str = ""  # the owner's full proposal when short, inside <document> tags
+    benchmarks: str = ""  # D93: refs available to assign to milestones
 
 
 def run_long_planner(
@@ -32,6 +35,8 @@ def run_long_planner(
     issues: list[Issue],
     ctx: CallContext,
     proposal: str = "",
+    benchmarks: str = "",
+    known_ref: Callable[[str], bool] | None = None,
 ) -> Roadmap:
     payload = LongPlanInput(
         brief=brief,
@@ -40,6 +45,7 @@ def run_long_planner(
         human_note=note or None,
         coordinator_issues=issues,
         proposal=proposal,
+        benchmarks=benchmarks,
     )
     limit = ctx.settings.budgets.max_criteria_per_milestone
     finished = {
@@ -53,6 +59,12 @@ def run_long_planner(
                 raise ValueError(  # one repair with this reason
                     f"{m.id} has {n} acceptance criteria; at most {limit} per unfinished "
                     "milestone. Split it into smaller milestones in dependency order."
+                )
+            unknown = [r for r in m.benchmarks if known_ref is not None and not known_ref(r)]
+            if m.id not in finished and unknown:
+                raise ValueError(
+                    f"{m.id}: benchmark refs {unknown} are not in the benchmarks list; "
+                    "use only refs listed there"
                 )
         return draft
 

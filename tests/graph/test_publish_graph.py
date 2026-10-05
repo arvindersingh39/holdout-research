@@ -44,9 +44,9 @@ def _finish_two_milestones(fake: FakeLLM) -> None:
 def test_finished_run_is_published_then_gated(tmp_path: Path, fake: FakeLLM) -> None:
     _finish_two_milestones(fake)
     script_writer(fake)
-    ch = FakeChannel(*[decide("approve")] * 5)
+    ch = FakeChannel(*[decide("approve")] * 4)
     deps, res = _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "result", "result", "publication"]
+    assert ch.gates == ["roadmap", "result", "result", "publication"]
     md = ch.requests[-1].markdown
     assert "paper.pdf" in md and "experiments" in md
     assert res.status == "complete"
@@ -63,7 +63,7 @@ def test_one_revision_with_the_owners_note(tmp_path: Path, fake: FakeLLM) -> Non
     script_writer(fake)
     script_writer(fake, " revised")
     ch = FakeChannel(
-        *[decide("approve")] * 4,
+        *[decide("approve")] * 3,
         decide("redirect", note="Shorten the abstract."),
         decide("approve"),
     )
@@ -77,7 +77,7 @@ def test_one_revision_with_the_owners_note(tmp_path: Path, fake: FakeLLM) -> Non
 def test_stop_at_publication(tmp_path: Path, fake: FakeLLM) -> None:
     _finish_two_milestones(fake)
     script_writer(fake)
-    ch = FakeChannel(*[decide("approve")] * 4, decide("stop"))
+    ch = FakeChannel(*[decide("approve")] * 3, decide("stop"))
     _, res = _run(tmp_path, fake, ch)
     assert res.status == "stopped"
 
@@ -94,7 +94,7 @@ def test_cli_publish_on_a_paused_run(
     fake.script("long_planner", ROADMAP)
     script_milestone(fake, 1)
     deps = make_deps(tmp_path, fake)  # publishing off inside the graph
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))  # stop at M1's result
+    ch = FakeChannel(decide("approve"), decide("stop"))  # stop at M1's result
     with open_graph(deps) as graph:
         drive(graph, deps.run_id, ch, start=True)
     script_writer(fake)

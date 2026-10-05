@@ -1,7 +1,8 @@
 """#1 Retriever: proposal and papers to PaperCards and a ResearchBrief (Phase 2).
 
 Papers reach the model one at a time, inside <document> tags, only for their PaperCard.
-The brief is built from the proposal plus PaperCards, never from raw papers.
+The brief is built from the proposal plus PaperCards, never from raw papers. Its benchmarks
+(experimental results to reproduce, D93) are quote-checked against the full texts by code.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 
 from r2r.agents.common import draft_model, finalize
 from r2r.contracts import BlobRef, PaperCard, Proposal, ResearchBrief
+from r2r.harness.benchmarks import verify_benchmarks
 from r2r.ingest.citations import to_bibtex
 from r2r.ingest.documents import wrap_document
 from r2r.llm.gateway import CallContext, call_structured
@@ -49,9 +51,11 @@ def run_retriever(
 
     cards: list[PaperCard] = []
     card_refs: list[BlobRef] = []
+    texts = {"proposal": blobs.get_text(proposal.text_ref)}  # D93: sources for quote checks
     for ref in proposal.paper_refs:
         doc = wrap_document(blobs.get_slice(ref, limit), source=ref.summary[:80])
         card = call_structured(ROLE, "retriever", PaperInput(paper=doc), PaperCard, ctx)
+        texts[card.citation.key] = blobs.get_text(ref)
         cards.append(card)
         card_refs.append(
             blobs.put(
@@ -72,6 +76,8 @@ def run_retriever(
         ctx,
         finalize=lambda draft: finalize(ResearchBrief, draft, ROLE, ctx, paper_cards=refs),
     )
+    if brief.benchmarks:
+        brief = brief.model_copy(update={"benchmarks": verify_benchmarks(brief.benchmarks, texts)})
     brief_ref = blobs.put(
         brief.model_dump_json(),
         kind="contract",

@@ -1,5 +1,6 @@
 """Proposal ingestion and the #1 retriever with FakeLLM and fake embeddings."""
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -149,3 +150,29 @@ def test_no_papers(env: Env) -> None:
     res = run_retriever(prop, env.blobs, env.paths, env.ctx)
     assert res.brief.paper_cards == [] and res.card_refs == []
     assert res.bib_path.read_text() == ""
+
+
+def test_benchmarks_are_quote_checked(env: Env) -> None:
+    """D93: the brief's experimental results are checked against the proposal by code."""
+    (env.proposal_dir / "proposal.md").write_text(
+        "# Variance-reduced Monte Carlo pricing\n\nThe control variate cuts the standard error "
+        "to 0.0123 at 10^5 paths.\n"
+    )
+    prop = ingest_proposal(env.proposal_dir, env.blobs, env.index, env.ctx)
+    bench = {
+        "quantity": "standard error",
+        "units": "",
+        "tolerance": 0.00005,
+        "conditions": "10^5 paths",
+        "source": "proposal",
+        "verified": True,  # the model's claim is ignored: code decides
+    }
+    draft = json.loads(BRIEF_DRAFT) | {
+        "benchmarks": [
+            bench | {"id": "BM1", "value": 0.0123, "quote": "cuts the standard error to 0.0123"},
+            bench | {"id": "BM2", "value": 0.5, "quote": "cuts the standard error to 0.0123"},
+        ]
+    }
+    env.fake.script("retriever", paper_card(), json.dumps(draft))
+    res = run_retriever(prop, env.blobs, env.paths, env.ctx)
+    assert [b.verified for b in res.brief.benchmarks] == [True, False]

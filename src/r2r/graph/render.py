@@ -41,8 +41,19 @@ def _(b: ResearchBrief) -> str:
             f"**Methods** {_inline(b.methods)} · **Datasets** {_inline(b.datasets)}",
             f"**Constraints**\n{_bullets(b.constraints)}",
             f"**Open questions**\n{_bullets(b.open_questions)}",
+            "**Benchmarks** (results to reproduce)\n"
+            + _bullets([_benchmark(x) for x in b.benchmarks]),
             f"Papers: {len(b.paper_cards)}",
         ]
+    )
+
+
+def _benchmark(b) -> str:
+    units = f" {b.units}" if b.units else ""
+    mark = "" if b.verified else " · ⚑ quote not found in the source"
+    return (
+        f"{b.id}: {b.quantity} = {b.value:g}{units} (±{b.tolerance:g}) · {b.conditions} · "
+        f'{b.source}: "{b.quote}"{mark}'
     )
 
 
@@ -54,6 +65,8 @@ def _(r: Roadmap) -> str:
         deps = f" (depends on {', '.join(m.depends_on)})" if m.depends_on else ""
         lines.append(f"- {mark}**{m.id} · {m.title}** [{m.status}]{deps}")
         lines += [f"  - {c.id}: {c.text}" for c in m.acceptance_criteria]
+        if m.benchmarks:
+            lines.append(f"  - benchmarks you will run: {', '.join(m.benchmarks)}")
     lines += ["", f"**Rationale.** {r.rationale}"]
     if r.decisions_log:
         lines += ["", "**Decisions**", _bullets(r.decisions_log)]
@@ -109,16 +122,15 @@ def _(m: MathSpec) -> str:
             f"**Algorithm.** {m.algorithm}",
             "**Signatures**\n" + "\n".join(f"- `{s}`" for s in m.signatures),
             f"**Tolerances**\n{tol}",
-            f"**Files** tests: {_inline(m.test_files)} · checks: {_inline(m.check_files)}"
-            f" · bench: {bench}",
+            f"**Files** bench: {bench} · figures: {_inline(m.figure_scripts)}",
         ]
     )
 
 
 @render.register
 def _(r: TestResult) -> str:
-    head = f"## Tests · {r.milestone_id}: **{'PASS' if r.passed else 'FAIL'}**"
-    lines = [head, f"{r.n_passed} passed · {r.n_failed} failed · frozen ok: {r.frozen_ok}"]
+    head = f"## Code check · {r.milestone_id}: **{'PASS' if r.passed else 'FAIL'}**"
+    lines = [head, f"{r.n_passed} passed · {r.n_failed} failed"]
     for f in r.failures:
         crit = f" ({f.criterion_id})" if f.criterion_id else ""
         lines.append(f"- `{f.test_id}`{crit}: {f.message}")
@@ -130,7 +142,7 @@ TOTAL_CHARS = 30_000
 
 
 def render_files(root, paths: list[str]) -> str:
-    """Test and check files for the tests gate, each in a code block, truncated."""
+    """Files for a gate, each in a code block, truncated."""
     parts, total = [], 0
     for rel in paths:
         try:
@@ -152,19 +164,3 @@ def _verdict(c) -> str:
     if not c.checked:
         return "not checked (you judge)"
     return "pass" if c.passed else "FAIL"
-
-
-def render_attempts(patches: list, outcomes: list) -> str:
-    """Simplifier attempts (D85) for the result gate: technique, complexity, kept or not, why."""
-    if not outcomes:
-        return ""
-    lines = ["**Simplifier attempts**"]
-    for patch, o in zip(patches, outcomes, strict=True):
-        tech = patch.technique if patch else "none"
-        mark = "kept" if o.accepted else "reverted"
-        cx = ""
-        if o.complexity_before is not None:
-            after = o.complexity_after if o.complexity_after is not None else "-"
-            cx = f"complexity {o.complexity_before} → {after}, "
-        lines.append(f"- #{o.attempt} {tech}: {cx}{mark}: {o.reason}")
-    return "\n".join(lines)

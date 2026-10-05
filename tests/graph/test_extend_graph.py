@@ -1,5 +1,5 @@
 """`r2r extend`: a finished run takes a new proposal and grows new milestones on the same
-workspace; finished milestones, their code and frozen checks stay as they are."""
+workspace; finished milestones and their code stay as they are."""
 
 import json
 from pathlib import Path
@@ -17,7 +17,6 @@ from graph_helpers import (
 from r2r.contracts import Roadmap
 from r2r.graph.driver import drive, open_graph
 from r2r.graph.extend import ExtendError, extend
-from r2r.harness.frozen import verify
 from r2r.llm.fake import FakeLLM
 
 ONLY_M1 = Roadmap.model_validate({**ROADMAP.model_dump(), "milestones": [ROADMAP.milestones[0]]})
@@ -35,7 +34,7 @@ def _finish_m1(tmp_path: Path, fake: FakeLLM):
     script_milestone(fake, 1)
     deps = make_deps(tmp_path, fake)
     with open_graph(deps) as graph:
-        res = drive(graph, deps.run_id, FakeChannel(*[decide("approve")] * 3), start=True)
+        res = drive(graph, deps.run_id, FakeChannel(*[decide("approve")] * 2), start=True)
     assert res.status == "complete"
     return deps
 
@@ -54,7 +53,7 @@ def test_extend_adds_milestones_after_the_finished_ones(tmp_path: Path, fake: Fa
     with open_graph(deps2) as graph:
         res = drive(graph, deps2.run_id, ch, start=False)
     assert res.status == "complete"
-    assert ch.gates == ["roadmap", "result"]  # the new roadmap is shown; tests reviewed once only
+    assert ch.gates == ["roadmap", "result"]  # the new roadmap is shown
     assert [m.status for m in res.state["roadmap"].milestones] == ["done", "done"]
     planner = [r for r in fake.calls if r.role == "long_planner"][-1]
     payload = str(planner.messages[1]["content"])
@@ -62,7 +61,6 @@ def test_extend_adds_milestones_after_the_finished_ones(tmp_path: Path, fake: Fa
     assert "Keep every finished milestone" in payload
     root = deps2.workspace().root
     assert (root / "src/sq1/core.py").is_file() and (root / "src/sq2/core.py").is_file()
-    verify(deps2.workspace())
 
 
 def test_extend_refuses_a_run_with_open_milestones(tmp_path: Path, fake: FakeLLM) -> None:
@@ -70,9 +68,7 @@ def test_extend_refuses_a_run_with_open_milestones(tmp_path: Path, fake: FakeLLM
     script_milestone(fake, 1)
     deps = make_deps(tmp_path, fake)
     with open_graph(deps) as graph:  # stop at M1's result gate: M2 still open
-        drive(
-            graph, deps.run_id, FakeChannel(decide("approve"), decide("approve"), None), start=True
-        )
+        drive(graph, deps.run_id, FakeChannel(decide("approve"), None), start=True)
     with pytest.raises(ExtendError, match="still open"):
         extend(deps, _new_proposal(tmp_path))
 

@@ -5,7 +5,16 @@ a second overflow stops the run with a clear message."""
 from pathlib import Path
 
 import pytest
-from graph_helpers import PASS, ROADMAP, SPEC, FakeChannel, decide, design, make_deps
+from graph_helpers import (
+    PASS,
+    ROADMAP,
+    SPEC,
+    FakeChannel,
+    coder_pass,
+    decide,
+    design,
+    make_deps,
+)
 
 from r2r.graph.driver import drive, open_graph
 from r2r.llm.fake import FakeLLM
@@ -27,8 +36,9 @@ def test_oversized_spec_asks_the_long_planner_to_split(tmp_path: Path, fake: Fak
     fake.script("short_planner", TOO_LONG, TOO_LONG, SPEC)
     fake.script("coordinator", PASS)
     fake.script("math_designer", design(1))
+    fake.script("coder", *coder_pass(1))
     deps = make_deps(tmp_path, fake)
-    ch = FakeChannel(decide("approve"), decide("stop"))  # roadmap, then the tests gate
+    ch = FakeChannel(decide("approve"), decide("stop"))  # roadmap, then the result gate
     with open_graph(deps) as graph:
         drive(graph, deps.run_id, ch, start=True)
     note = _payload(fake, "long_planner", 1)

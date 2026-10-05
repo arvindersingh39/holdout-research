@@ -3,7 +3,7 @@
 Docker sandbox (production): network off; CPU, memory and PID limits from budgets.yaml; all
 capabilities dropped; read-only root filesystem with a /tmp tmpfs; non-root user; no environment
 variables from the host. The workspace is mounted read-write, with tests/frozen/ and checks/
-re-mounted read-only over it, and the harness runners read-only at /harness.
+re-mounted read-only over it.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from r2r.settings import SandboxLimits
 log = get_logger("r2r.harness.sandbox")
 
 SANDBOX_DIR = Path(__file__).resolve().parents[3] / "sandbox"
-RUNNERS_DIR = Path(__file__).resolve().parent / "runners"
 IMAGE_REPO = "r2r-sandbox"
 OUTPUT_TAIL_CHARS = 100_000
 TMPFS = {"/tmp": "rw,size=256m"}
@@ -89,7 +88,6 @@ class DockerBackend:
     def _volumes(self) -> dict[str, dict[str, str]]:
         vols = {
             str(self.ws.root): {"bind": "/workspace", "mode": "rw"},
-            str(RUNNERS_DIR): {"bind": "/harness", "mode": "ro"},
         }
         for d in FROZEN_DIRS:
             vols[str(self.ws.root / d)] = {"bind": f"/workspace/{d}", "mode": "ro"}
@@ -138,13 +136,7 @@ class LocalProcessBackend:
         self.ws = ws
 
     def _translate(self, cmd: list[str]) -> list[str]:
-        if cmd[:2] == ["radon", "raw"]:  # radon is only in the sandbox image (D28)
-            cmd = ["python", "/harness/sloc_runner.py", cmd[-1]]
-        out = [sys.executable if c == "python" else c for c in cmd]
-        return [
-            str(RUNNERS_DIR / c.removeprefix("/harness/")) if c.startswith("/harness/") else c
-            for c in out
-        ]
+        return [sys.executable if c == "python" else c for c in cmd]
 
     def run(self, cmd: list[str], timeout_s: float) -> RunResult:
         env = {

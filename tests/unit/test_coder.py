@@ -8,31 +8,16 @@ from samples import milestone_spec
 
 from r2r.agents.coder import CoderTools, run_coder_session
 from r2r.agents.math_designer import DesignError, write_design
-from r2r.contracts import BenchSpec, FileSpec, MathDesign, MathSpec, SanityCheck
-from r2r.harness.frozen import freeze, verify
+from r2r.contracts import BenchSpec, FileSpec, MathDesign, MathSpec
+from r2r.harness.gitops import Git
 from r2r.harness.sandbox import LocalProcessBackend
+from r2r.harness.stubcheck import record_stubs
 from r2r.harness.workspace import Workspace
 from r2r.llm.fake import FakeLLM, tool_call
 from r2r.llm.gateway import CallContext
 from r2r.store.runs import run_paths
 
 META = {"created_by": "math_designer", "run_id": "run-test", "milestone_id": "M1"}
-TEST_FILE = """\
-from sq.core import square
-
-
-def oracle_square(x):
-    return x * x
-
-
-def test_AC1__S1_square_of_three():
-    assert square(3) == oracle_square(3) == 9
-
-
-def test_AC1__S1_square_of_negative():
-    assert square(-2) == oracle_square(-2)
-"""
-SANITY = "tests/frozen/sanity/test_sanity_m1.py"
 STUB = "def square(x: float) -> float:\n    raise NotImplementedError\n"
 IMPL = "def square(x: float) -> float:\n    return x * x\n"
 
@@ -43,20 +28,9 @@ def design() -> MathDesign:
         formulation="f(x) = x^2",
         algorithm="multiply",
         signatures=["square(x: float) -> float"],
-        test_files=[SANITY],
-        sanity_checks=[
-            SanityCheck(
-                id="S1",
-                criterion_ids=["AC1"],
-                kind="limit_case",
-                statement="square agrees with x*x",
-                file=SANITY,
-            )
-        ],
         bench=BenchSpec(entrypoint="bench/bench_main.py", problem_size="1e5 calls"),
     )
     files = [
-        FileSpec(path=SANITY, purpose="test", content=TEST_FILE),
         FileSpec(path="src/sq/__init__.py", purpose="stub", content=""),
         FileSpec(path="src/sq/core.py", purpose="stub", content=STUB),
         FileSpec(
@@ -75,10 +49,14 @@ def ws(tmp_path: Path) -> Workspace:
 
 @pytest.fixture
 def tools(ws: Workspace) -> CoderTools:
-    write_design(ws, design(), previous=None)
-    freeze(ws)
+    written = write_design(ws, design(), previous=None)
     return CoderTools(
-        ws, LocalProcessBackend(ws), run_id="run-test", milestone_id="M1", timeout_s=60
+        ws,
+        LocalProcessBackend(ws),
+        run_id="run-test",
+        milestone_id="M1",
+        timeout_s=60,
+        stubs=record_stubs(ws.root, written),
     )
 
 
@@ -91,18 +69,17 @@ def _call(tools: CoderTools, name: str, **args) -> str:
 # --- design writing -------------------------------------------------------------------------
 
 
-def test_write_design_writes_files(ws: Workspace) -> None:
+def test_write_design_writes_stubs(ws: Workspace) -> None:
     written = write_design(ws, design(), previous=None)
-    assert SANITY in written
+    assert "src/sq/core.py" in written and "bench/bench_main.py" in written
     assert (ws.root / "src/sq/core.py").read_text() == STUB
 
 
-def test_design_cannot_overwrite_existing_src_or_frozen(ws: Workspace) -> None:
+def test_design_cannot_overwrite_committed_code(ws: Workspace) -> None:
     write_design(ws, design(), previous=None)
-    freeze(ws)
-    again = design()
-    with pytest.raises(DesignError, match="frozen"):
-        write_design(ws, again, previous=None)  # the sanity file is frozen now
+    Git(ws).commit("M1 stubs")
+    with pytest.raises(DesignError, match="already exists"):
+        write_design(ws, design(), previous=None)  # earlier milestones' code stays
 
 
 def test_redesign_replaces_previous_attempt(ws: Workspace) -> None:
@@ -113,12 +90,11 @@ def test_redesign_replaces_previous_attempt(ws: Workspace) -> None:
     assert (ws.root / "src/sq/core.py").read_text() == STUB
 
 
-def test_design_path_attack_refused(ws: Workspace) -> None:
-    bad = design()
-    data = bad.model_dump()
-    data["files"].append({"path": "pyproject.toml", "purpose": "stub", "content": "x"})
-    with pytest.raises(DesignError):
-        write_design(ws, MathDesign.model_validate(data), previous=None)
+def test_design_path_attack_refused() -> None:
+    data = design().model_dump()
+    data["files"].append({"path": "src/../../evil.py", "purpose": "stub", "content": "x"})
+    with pytest.raises(ValueError, match="inside the workspace"):
+        MathDesign.model_validate(data)
 
 
 # --- coder tools ------------------------------------------------------------------------------
@@ -126,9 +102,8 @@ def test_design_path_attack_refused(ws: Workspace) -> None:
 
 def test_list_and_read(tools: CoderTools) -> None:
     listing = _call(tools, "list_files", dir=".")
-    assert "src/sq/core.py" in listing and SANITY in listing
+    assert "src/sq/core.py" in listing and "bench/bench_main.py" in listing
     assert "NotImplementedError" in _call(tools, "read_file", path="src/sq/core.py")
-    assert "test_AC1__S1_square_of_three" in _call(tools, "read_file", path=SANITY)
 
 
 def test_read_file_line_cap(tools: CoderTools) -> None:
@@ -159,28 +134,27 @@ def test_edit_requires_unique_match(tools: CoderTools) -> None:
 def test_create_file_limits(tools: CoderTools) -> None:
     too_long = "\n".join("pass" for _ in range(601))
     assert "600 lines" in _call(tools, "create_file", path="src/sq/long.py", content=too_long)
-    assert _call(tools, "create_file", path="figures/plot.py", content="x").startswith("error")
+    assert _call(tools, "create_file", path="figures/plot.py", content="x").startswith("wrote")
 
 
-def test_frozen_writes_blocked_and_logged(tools: CoderTools, ws: Workspace) -> None:
-    out = _call(tools, "edit_file", path=SANITY, old="== 9", new="== 0")
-    assert out.startswith("error") and "read-only" in out
-    out = _call(tools, "create_file", path="checks/check_evil.py", content="pass")
-    assert out.startswith("error")
-    assert len(tools.tamper_attempts) == 2
-    verify(ws)  # the frozen hash is intact
+def test_writes_outside_the_code_folders_are_refused(tools: CoderTools) -> None:
+    for path in ("tests/test_x.py", "pyproject.toml", "results/benchmarks/m1.json"):
+        assert _call(tools, "create_file", path=path, content="x").startswith("error")
+    assert len(tools.blocked_writes) == 3
 
 
-def test_run_tests_tool(tools: CoderTools) -> None:
-    out = json.loads(_call(tools, "run_tests"))
-    assert out["passed"] is False and out["n_failed"] == 2
+def test_check_code_tool(tools: CoderTools) -> None:
+    out = json.loads(_call(tools, "check_code"))
+    assert out["passed"] is False and "not implemented" in out["failures"][0]["message"]
     assert tools.last_result is not None and not tools.last_result.passed
 
 
 # --- coder session ------------------------------------------------------------------------------
 
 
-def test_session_stops_when_tests_pass(tools: CoderTools, ctx: CallContext, fake: FakeLLM) -> None:
+def test_session_stops_when_the_check_passes(
+    tools: CoderTools, ctx: CallContext, fake: FakeLLM
+) -> None:
     fake.script(
         "coder",
         [
@@ -191,7 +165,7 @@ def test_session_stops_when_tests_pass(tools: CoderTools, ctx: CallContext, fake
                 new="return x * x",
             )
         ],
-        [tool_call("run_tests")],
+        [tool_call("check_code")],
         "should never be reached",
     )
     session = run_coder_session(milestone_spec(), design().spec, None, tools, ctx)
@@ -202,8 +176,35 @@ def test_session_stops_when_tests_pass(tools: CoderTools, ctx: CallContext, fake
 
 
 def test_session_uses_escalation_model(tools: CoderTools, ctx: CallContext, fake: FakeLLM) -> None:
-    fake.script("coder", "giving up")
+    fake.script("coder", "giving up", "still giving up")  # one nudge, then the session ends
     run_coder_session(
         milestone_spec(), design().spec, None, tools, ctx, model="anthropic/claude-opus-5-5"
     )
     assert fake.calls[0].model == "anthropic/claude-opus-5-5"
+
+
+def test_coder_sees_benchmark_refs_never_values(
+    tools: CoderTools, ctx: CallContext, fake: FakeLLM
+) -> None:
+    """D93: the reproduce script and results file are named; mismatches arrive on a fix round."""
+    fake.script("coder", "done", "done")
+    tools.reproduce = "bench/reproduce_m1.py"
+    bench = [
+        {"ref": "benchmarks.BM1", "quantity": "attack rate", "units": "", "conditions": "N=20"}
+    ]
+    run_coder_session(
+        milestone_spec(),
+        design().spec,
+        None,
+        tools,
+        ctx,
+        benchmarks=bench,
+        results_file="results/benchmarks/m1.json",
+        mismatches="- benchmarks.BM1: generated 0.5, recorded 0.41 (±0.005)",
+    )
+    user = next(m for m in fake.calls[0].messages if m["role"] == "user")["content"]
+    text = user if isinstance(user, str) else "".join(b.get("text", "") for b in user)
+    payload = json.loads(text[text.index("{") : text.rindex("}") + 1])
+    assert payload["benchmarks"] == bench and payload["reproduce_script"] == "bench/reproduce_m1.py"
+    assert payload["results_file"] == "results/benchmarks/m1.json"
+    assert "recorded 0.41" in payload["mismatches"]

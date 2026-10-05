@@ -1,14 +1,14 @@
-"""Phase 5 in the graph: tests first, red before green, frozen tests, coder sessions, tamper."""
+"""D93 in the graph: the designer writes the formulation and stubs, the coder implements them until
+the stub check passes, and the result goes to the owner. No tests, freezing or extra gates."""
 
 from pathlib import Path
 
 from graph_helpers import (
-    BROKEN_TESTS,
-    GOOD_TESTS,
     IMPL,
+    PASS,
+    REVISE,
     ROADMAP,
     SPEC,
-    VACUOUS_TESTS,
     FakeChannel,
     coder_pass,
     decide,
@@ -18,10 +18,8 @@ from graph_helpers import (
 )
 
 from r2r.graph.driver import drive, open_graph
-from r2r.harness.frozen import verify
 from r2r.harness.gitops import Git
-from r2r.harness.sandbox import LocalProcessBackend
-from r2r.llm.fake import FakeLLM, tool_call
+from r2r.llm.fake import FakeLLM
 
 PASS_ALL = [decide("approve")] * 3 + [decide("stop")]
 
@@ -36,250 +34,109 @@ def _run(tmp_path: Path, fake: FakeLLM, ch: FakeChannel, **deps_kw):
 def _start(fake: FakeLLM) -> None:
     fake.script("long_planner", ROADMAP)
     fake.script("short_planner", SPEC)
-    fake.script("coordinator", __import__("graph_helpers").PASS)
+    fake.script("coordinator", PASS)
 
 
-def test_happy_path_tests_first_then_code(tmp_path: Path, fake: FakeLLM) -> None:
+def test_happy_path_design_then_code(tmp_path: Path, fake: FakeLLM) -> None:
     fake.script("long_planner", ROADMAP)
     script_milestone(fake, 1)
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+    ch = FakeChannel(decide("approve"), decide("stop"))
     deps, res = _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "result"]
-    tests_md = ch.requests[1].markdown
-    assert "test_AC1__square_of_three" in tests_md and "Math spec · M1" in tests_md
+    assert ch.gates == ["roadmap", "result"]  # no tests, design or freeze gates
     ws = deps.workspace()
-    verify(ws)  # frozen and intact
     assert (ws.root / "src/sq1/core.py").read_text() == IMPL
     git = Git(ws)
     assert git.current_branch() == "main"  # passing work merged into main
-    assert "coder session 1 (pass)" in git.run("log", "--format=%s", "-3")
+    log = git.run("log", "--format=%s", "-3")
+    assert "M1: math design (stubs)" in log and "coder session 1 (pass)" in log
+    assert not list((ws.root / "tests").rglob("*.py"))  # nothing test-like was written
     d = res.state["digest"]
-    assert d.status == "met" and d.criteria[0].evidence == "2/2 tests pass"  # the sanity checks
-    assert res.state["test_result"].passed and res.state["coder_sessions"] == 1
+    assert d.status == "met" and "no benchmark" in d.criteria[0].evidence
+    assert not d.criteria[0].checked  # the owner judges
+    assert res.state["stubs"] == [{"path": "src/sq1/core.py", "name": "square", "params": ["x"]}]
+    assert "Code check" in ch.requests[-1].markdown or "Result · M1" in ch.requests[-1].markdown
 
 
-def test_vacuous_tests_redesigned_then_design_gate(tmp_path: Path, fake: FakeLLM) -> None:
+def test_stuck_coder_escalates_then_coder_gate(tmp_path: Path, fake: FakeLLM) -> None:
     _start(fake)
-    fake.script("math_designer", design(1, VACUOUS_TESTS), design(1, VACUOUS_TESTS))
+    fake.script("math_designer", design(1))
+    # every session: a reply without tools, one nudge, another reply without tools
+    fake.script("coder", "a", "b", "c", "d", "e", "Opus: the spec is ambiguous about rounding.")
     ch = FakeChannel(decide("approve"), decide("stop"))
-    _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "design"]
-    second = [r for r in fake.calls if r.role == "math_designer"][1]
-    assert "AC1" in str(second.messages[1]["content"])  # feedback names the vacuous criterion
-    assert "NotImplementedError" in ch.requests[-1].markdown
-
-
-def test_broken_test_reported_then_fixed(tmp_path: Path, fake: FakeLLM) -> None:
-    _start(fake)
-    fake.script("math_designer", design(1, BROKEN_TESTS), design(1))
-    fake.script("coder", *coder_pass(1))
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
-    _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "result"]
-    second = [r for r in fake.calls if r.role == "math_designer"][1]
-    assert "wrong reason" in str(second.messages[1]["content"])
-
-
-def test_tamper_attempt_via_tools_is_blocked_and_counted(tmp_path: Path, fake: FakeLLM) -> None:
-    _start(fake)
-    fake.script("math_designer", design(1))
-    fake.script(
-        "coder",
-        [
-            tool_call(
-                "edit_file",
-                path="tests/frozen/sanity/test_sanity_m1.py",
-                old="== oracle_square(3)",
-                new="== 0",
-            )
-        ],
-        *coder_pass(1),
-    )
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
-    deps, res = _run(tmp_path, fake, ch)
-    assert res.state["tamper_attempts"] == 1
-    assert ch.gates == ["roadmap", "tests", "result"]
-    verify(deps.workspace())
-
-
-class TamperingBackend(LocalProcessBackend):
-    """Simulates code that rewrites a frozen test on disk the first time tests run after freezing
-    (impossible in Docker, where those dirs are mounted read-only)."""
-
-    done = False
-
-    def run(self, cmd, timeout_s):
-        test_file = self.ws.root / "tests/frozen/sanity/test_sanity_m1.py"
-        if "pytest" in cmd and self.ws.frozen_manifest.exists() and not TamperingBackend.done:
-            TamperingBackend.done = True
-            test_file.chmod(0o644)
-            test_file.write_text(
-                test_file.read_text().replace("== oracle_square(3)", "== oracle_square(3) or True")
-            )
-        return super().run(cmd, timeout_s)
-
-
-def test_tamper_on_disk_goes_to_gate_and_restore(tmp_path: Path, fake: FakeLLM) -> None:
-    TamperingBackend.done = False
-    _start(fake)
-    fake.script("math_designer", design(1))
-    fake.script(
-        "coder",
-        [tool_call("create_file", path="src/sq1/core.py", content=IMPL)],
-        "done",
-        [tool_call("run_tests")],
-    )
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("approve"), decide("stop"))
-    deps, res = _run(tmp_path, fake, ch, sandbox_factory=TamperingBackend)
-    assert ch.gates == ["roadmap", "tests", "tamper", "result"]
-    assert "changed: tests/frozen/sanity/test_sanity_m1.py" in ch.requests[2].markdown
-    verify(deps.workspace())  # restored from git
-    assert res.state["digest"].status == "met"
-
-
-def test_escalates_then_coder_gate(tmp_path: Path, fake: FakeLLM) -> None:
-    _start(fake)
-    fake.script("math_designer", design(1))
-    fake.script("coder", "giving up", "still stuck", "no luck with Opus either")
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
     _, res = _run(tmp_path, fake, ch)
     models = [r.model for r in fake.calls if r.role == "coder"]
-    assert models == ["anthropic/claude-sonnet-5-5"] * 2 + ["anthropic/claude-opus-5-5"]
-    assert ch.gates == ["roadmap", "tests", "coder"]
-    assert "3 coder sessions used" in ch.requests[-1].markdown
+    assert models == ["anthropic/claude-sonnet-5-5"] * 4 + ["anthropic/claude-opus-5-5"] * 2
+    assert ch.gates == ["roadmap", "coder"]
+    md = ch.requests[-1].markdown
+    assert "3 coder sessions used" in md and "not implemented yet" in md
+    assert "the spec is ambiguous about rounding" in md
     assert res.state["coder_sessions"] == 3
+
+
+def test_coder_gate_approve_reports_the_partial_result(tmp_path: Path, fake: FakeLLM) -> None:
+    _start(fake)
+    fake.script("math_designer", design(1))
+    fake.script("coder", *"abcdef")
+    fake.script("digest", '{"text": "square is still a stub."}')  # the deviations note
+    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+    _, res = _run(tmp_path, fake, ch)
+    assert ch.gates == ["roadmap", "coder", "result"]
+    d = res.state["digest"]
+    assert d.status == "partial" and d.deviations == "square is still a stub."  # it imports
 
 
 def test_escalated_session_can_succeed(tmp_path: Path, fake: FakeLLM) -> None:
     _start(fake)
     fake.script("math_designer", design(1))
-    fake.script("coder", "giving up", "still stuck", *coder_pass(1))
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+    fake.script("coder", "a", "b", "c", "d", *coder_pass(1))
+    ch = FakeChannel(decide("approve"), decide("stop"))
     _, res = _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "result"]
+    assert ch.gates == ["roadmap", "result"]
     assert res.state["coder_sessions"] == 3 and res.state["digest"].status == "met"
 
 
-def test_owner_redirect_at_tests_gate_goes_back_to_designer(tmp_path: Path, fake: FakeLLM) -> None:
-    _start(fake)
-    fake.script("math_designer", design(1), design(1))
-    fake.script("coder", *coder_pass(1))
-    ch = FakeChannel(
-        decide("approve"),
-        decide("redirect", note="Also test square(0)."),
-        decide("approve"),
-        decide("stop"),
-    )
-    _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "tests", "result"]
-    second = [r for r in fake.calls if r.role == "math_designer"][1]
-    assert "Also test square(0)." in str(second.messages[1]["content"])
-
-
-def test_second_milestone_keeps_first_milestones_tests(tmp_path: Path, fake: FakeLLM) -> None:
+def test_second_milestone_builds_on_the_first(tmp_path: Path, fake: FakeLLM) -> None:
     fake.script("long_planner", ROADMAP, ROADMAP)
     script_milestone(fake, 1)
     script_milestone(fake, 2)
-    deps, res = _run(tmp_path, fake, FakeChannel(*PASS_ALL))
+    deps, _ = _run(tmp_path, fake, FakeChannel(*PASS_ALL))
     root = deps.workspace().root
-    assert (root / "tests/frozen/sanity/test_sanity_m1.py").exists()
-    assert (root / "tests/frozen/sanity/test_sanity_m2.py").exists()
-    assert res.state["test_result"].n_passed == 4  # both milestones' sanity checks run
-    existing = [r for r in fake.calls if r.role == "math_designer"][1]
-    assert "tests/frozen/sanity/test_sanity_m1.py" in str(existing.messages[1]["content"])
+    assert (root / "src/sq1/core.py").read_text() == IMPL  # untouched by M2
+    assert (root / "src/sq2/core.py").read_text() == IMPL
+    second = [r for r in fake.calls if r.role == "math_designer"][1]
+    assert "src/sq1/core.py" in str(second.messages[1]["content"])
 
 
-def test_unusable_design_is_a_failed_attempt_not_a_crash(tmp_path: Path, fake: FakeLLM) -> None:
-    """pilot-1 M3: #4 named the bench as a module path twice → ContractViolation. That must count
-    as a failed design (feedback, one redesign, then the design gate), not crash the run."""
+def test_unusable_design_retried_once_then_back_to_the_planner(
+    tmp_path: Path, fake: FakeLLM
+) -> None:
     bad = '{"spec": {"formulation": "x"}, "files": []}'  # fails MathDesign validation
-    _start(fake)
-    fake.script("math_designer", bad, bad, bad, bad)  # 2 attempts x (answer + repair)
+    fake.script("long_planner", ROADMAP, ROADMAP)
+    fake.script("short_planner", SPEC, SPEC)
+    fake.script("coordinator", PASS, PASS)
+    fake.script("math_designer", bad, bad, bad, bad, design(1))  # 2 tries x (answer + repair)
+    fake.script("coder", *coder_pass(1))
     ch = FakeChannel(decide("approve"), decide("stop"))
     _, res = _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "design"]
-    assert "invalid design" in ch.requests[-1].markdown
-    assert res.status == "stopped"
+    assert ch.gates == ["roadmap", "result"]
+    replan = [r for r in fake.calls if r.role == "long_planner"][1]
+    assert "the math designer failed twice" in str(replan.messages[1]["content"])
+    assert res.state["digest"].status == "met"
 
 
-def test_criterion_without_a_check_is_skipped_and_left_to_the_owner(
+def test_spec_still_failing_review_goes_to_the_designer_with_notes(
     tmp_path: Path, fake: FakeLLM
 ) -> None:
-    """D90: no sanity or contract check for AC1 skips it instead of rejecting the design."""
-    _start(fake)
-    fake.script("math_designer", design(1, sanity=False))
-    fake.script("coder", "nothing to implement against")  # no checks: the session passes at once
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
-    _, res = _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "result"]  # accepted on the first design
-    assert "AC1" in res.state["math_spec"].unchecked_criteria
-    ac1 = res.state["digest"].criteria[0]
-    assert not ac1.checked and "no sanity or contract check" in ac1.evidence
-    assert "AC1: not checked (you judge)" in ch.requests[-1].markdown
-
-
-def test_oracle_that_calls_the_package_is_redesigned(tmp_path: Path, fake: FakeLLM) -> None:
-    cheat = GOOD_TESTS.replace("return x * x", "return square(x)")
-    _start(fake)
-    fake.script("math_designer", design(1, cheat), design(1))
+    """D93: no escalation gate; the designer gets the coordinator's open issues."""
+    fake.script("long_planner", ROADMAP)
+    fake.script("short_planner", SPEC, SPEC, SPEC)
+    fake.script("coordinator", REVISE, REVISE, REVISE)  # fixture: at most 2 revise rounds
+    fake.script("math_designer", design(1))
     fake.script("coder", *coder_pass(1))
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
-    _run(tmp_path, fake, ch)
-    second = [r for r in fake.calls if r.role == "math_designer"][1]
-    assert "oracle_square uses square from the package" in str(second.messages[1]["content"])
-
-
-def _with_contracts(d, *checks):
-    from r2r.contracts import ContractCheck
-
-    cc = [ContractCheck.model_validate(c) for c in checks]
-    return d.model_copy(update={"spec": d.spec.model_copy(update={"contract_checks": cc})})
-
-
-INTERFACE = {
-    "id": "C1",
-    "criterion_ids": ["AC1"],
-    "kind": "interface",
-    "call": "sq1.core.square",
-    "params": ["x"],
-}
-
-
-def test_contract_checks_are_generated_frozen_and_counted(tmp_path: Path, fake: FakeLLM) -> None:
-    """D88: the harness renders contract checks into a frozen file that counts for its criteria."""
-    from r2r.harness.contract_checks import contract_file
-
-    _start(fake)
-    fake.script("math_designer", _with_contracts(design(1), INTERFACE))
-    fake.script("coder", *coder_pass(1))
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
-    deps, res = _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "result"]
-    ws = deps.workspace()
-    rel = contract_file("M1")
-    assert rel in res.state["math_spec"].test_files
-    assert "def test_AC1__C1_interface" in (ws.root / rel).read_text()
-    verify(ws)  # hashed with the frozen files
-    assert res.state["digest"].criteria[0].evidence == "3/3 tests pass"  # 2 sanity + 1 contract
-
-
-def test_interface_only_criterion_needs_no_red_test(tmp_path: Path, fake: FakeLLM) -> None:
-    """Stubs already carry the signatures, so an interface check passes on them by design."""
-    _start(fake)
-    fake.script("math_designer", _with_contracts(design(1, sanity=False), INTERFACE))
     ch = FakeChannel(decide("approve"), decide("stop"))
     _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests"]  # accepted on the first design
-
-
-def test_wrong_contract_fails_on_the_reference_and_is_redesigned(
-    tmp_path: Path, fake: FakeLLM
-) -> None:
-    wrong = INTERFACE | {"params": ["value"]}
-    _start(fake)
-    fake.script("math_designer", _with_contracts(design(1), wrong), design(1))
-    fake.script("coder", *coder_pass(1))
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
-    _run(tmp_path, fake, ch)
-    second = [r for r in fake.calls if r.role == "math_designer"][1]
-    assert "test_AC1__C1_interface" in str(second.messages[1]["content"])
+    assert ch.gates == ["roadmap", "result"]
+    designer = next(r for r in fake.calls if r.role == "math_designer")
+    issue = REVISE.issues[0].text
+    assert "unresolved notes" in str(designer.messages[1]["content"])
+    assert issue in str(designer.messages[1]["content"])

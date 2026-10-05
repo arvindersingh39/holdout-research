@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
+from functools import partial
 from typing import Any
 
 from langgraph.types import interrupt
@@ -15,30 +15,16 @@ from langgraph.types import interrupt
 from r2r.agents.coder import CoderTools, run_coder_session
 from r2r.agents.coordinator import run_coordinator
 from r2r.agents.long_planner import run_long_planner
-from r2r.agents.math_designer import (
-    DesignError,
-    reference_files,
-    run_math_designer,
-    write_design,
-)
-from r2r.agents.optimizer import notes, run_optimizer
+from r2r.agents.math_designer import DesignError, run_math_designer, write_design
 from r2r.agents.overseer import collect_evidence, run_overseer
 from r2r.agents.retriever import run_retriever
-from r2r.agents.scout import run_scout
 from r2r.agents.short_planner import run_short_planner
-from r2r.contracts import (
-    HumanDecision,
-    Milestone,
-    MilestoneSpec,
-    OptimizationOutcome,
-    Roadmap,
-    VerificationReport,
-)
+from r2r.contracts import HumanDecision, Milestone, Roadmap, VerificationReport
 from r2r.contracts.oversight import OversightPoint
 from r2r.digest.builder import build_digest, write_deviations
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest, gate_request
-from r2r.graph.render import render, render_attempts, render_files
+from r2r.graph.render import render
 from r2r.graph.routing import (
     advance_without_replan,
     current_on_open,
@@ -49,27 +35,23 @@ from r2r.graph.routing import (
 from r2r.graph.state import PipelineState
 from r2r.harness.autopilot import Facts
 from r2r.harness.autopilot import decide as decide_gate
-from r2r.harness.bench import BenchFailed
-from r2r.harness.checks import run_checks
-from r2r.harness.contract_checks import CONTRACT_DIR, write_contract_tests
-from r2r.harness.contract_checks import render as render_contract
-from r2r.harness.frozen import FrozenTamper, freeze, restore
+from r2r.harness.benchmarks import (
+    BenchmarkFileError,
+    check_results,
+    coder_view,
+    default_results,
+    expected_refs,
+    load_reference,
+    outline,
+    results_file,
+    write_benchmarks,
+)
 from r2r.harness.gitops import Git
-from r2r.harness.optimize import Baseline, baseline, source_listing, try_patch
-from r2r.harness.redgreen import assess
-from r2r.harness.refdata import DATA_DIR
-from r2r.harness.refdata import describe as describe_data
-from r2r.harness.refdata import install as install_data
 from r2r.harness.refdata import snapshot as snapshot_data
-from r2r.harness.reference import ReferenceError, check_reference, store_reference
-from r2r.harness.sanity import check_sanity, skip_unchecked, trusted_modules
-from r2r.harness.sanity import packages as sanity_packages
-from r2r.harness.stoprule import decide
-from r2r.harness.tests import CaseOutcome, run_tests, run_tests_detailed, test_names
-from r2r.harness.verify import coder_can_fix, run_verify
+from r2r.harness.stubcheck import check_code, record_stubs, reproduce_script
 from r2r.ingest.documents import wrap_document
 from r2r.ingest.proposal import ingest_proposal
-from r2r.llm.gateway import BudgetExceeded, ContractViolation
+from r2r.llm.gateway import ContractViolation
 from r2r.llm.tokens import estimate_tokens
 from r2r.log import get_logger
 from r2r.publish.collect import collect_from_states
@@ -104,6 +86,9 @@ def retrieve(state: PipelineState, deps: RunDeps) -> Update:
     ctx = deps.ctx()
     proposal = ingest_proposal(deps.proposal_dir, deps.blobs, deps.index, ctx)
     result = run_retriever(proposal, deps.blobs, deps.paths, ctx)
+    _reference_data(deps)  # the owner's data/ first: the snapshot is taken once
+    if result.brief.benchmarks:
+        write_benchmarks(deps.paths.root, result.brief.benchmarks)  # D93
     return {
         "run_id": deps.run_id,
         "status": "running",
@@ -140,6 +125,8 @@ def long_plan(state: PipelineState, deps: RunDeps) -> Update:
         _issues(state, "roadmap"),
         deps.ctx(briefing=_briefing(state, "long_planner")),
         proposal=_proposal_text(state, deps),
+        benchmarks=_outline(deps),
+        known_ref=partial(_known_ref, _reference(deps)),
     )
     new = current_on_open(new)
     gates = deps.settings.budgets.gates
@@ -173,7 +160,6 @@ def short_plan(state: PipelineState, deps: RunDeps) -> Update:
             previous,
             issues,
             deps.ctx(m.id, _briefing(state, "short_planner")),
-            data_files=[f"{DATA_DIR}/{n}" for n in _reference_data(deps)],
             proposal=_proposal_text(state, deps),
         )
     except ContractViolation as e:  # the milestone is too big to specify within the limits
@@ -217,35 +203,64 @@ def _reference_data(deps: RunDeps) -> list[str]:
     return snapshot_data(deps.proposal_dir, deps.paths.root, deps.settings.budgets.reference_data)
 
 
+def _reference(deps: RunDeps) -> dict[str, Any]:
+    _reference_data(deps)
+    return load_reference(deps.paths.root)
+
+
+def _known_ref(reference: dict[str, Any], ref: str) -> bool:
+    try:
+        return bool(expected_refs(reference, [ref]))
+    except KeyError:
+        return False
+
+
+def _outline(deps: RunDeps) -> str:
+    """D93: the benchmark refs the long planner may assign to milestones (no values needed)."""
+    return outline(_reference(deps))
+
+
+def _benchmarks(m: Milestone, deps: RunDeps) -> list[dict[str, str]]:
+    """What the designer and coder may know about this milestone's benchmarks: never values."""
+    if not m.benchmarks:
+        return []
+    try:
+        return coder_view(_reference(deps), m.benchmarks)
+    except KeyError as e:  # a ref the planner made up: shown at the benchmark gate, not fatal
+        log.warning("unknown benchmark ref", extra={"milestone": m.id, "error": str(e)[:200]})
+        return [{"ref": r} for r in m.benchmarks]
+
+
 def _existing_files(deps: RunDeps) -> list[str]:
     root = deps.workspace().root
     return sorted(
         p.relative_to(root).as_posix()
-        for d in ("src", "bench", "tests/frozen", "checks")
+        for d in ("src", "bench", "figures")
         for p in (root / d).rglob("*")
         if p.is_file() and "__pycache__" not in p.parts
     )
 
 
-def scout(state: PipelineState, deps: RunDeps) -> Update:
-    """Published baselines for this milestone's tests, quote-verified (D52). Never blocks a run."""
-    m = _milestone(state)
-    if state.get("baseline_note") is not None and all(
-        b.milestone_id == m.id for b in state.get("baselines", [])
-    ):
-        return {}  # already scouted for this milestone (e.g. after an escalation)
-    res = run_scout(
-        state["spec"], m, state["roadmap"].goal, deps.search(), deps.blobs, deps.ctx(m.id)
-    )
-    return {"baselines": res.cards, "baseline_note": res.note}
+def _coordinator_notes(state: PipelineState) -> str | None:
+    """D93: a spec still failing review after the revise rounds goes on with its issues noted."""
+    v = state.get("verdict")
+    if v is None or v.verdict != "revise":
+        return None
+    issues = "\n".join(f"- [{i.severity}] {i.text}" for i in v.issues)
+    return f"The reviewer's unresolved notes on the spec; respect them in the design:\n{issues}"
+
+
+DESIGN_TRIES = 2
 
 
 def design(state: PipelineState, deps: RunDeps) -> Update:
-    """#4 writes tests, checks, stubs and bench; the harness proves red before green (D32)."""
+    """#4 writes the formulation and stubs (D93). An unusable answer is retried once; a second
+    failure sends the milestone back to the long-term planner with the reason."""
     m = _milestone(state)
     spec = state["spec"]
-    ws, box = deps.workspace(), deps.sandbox()
-    Git(ws).checkout("main")
+    ws = deps.workspace()
+    git = Git(ws)
+    git.checkout("main")
     query = f"{m.title}. " + " ".join(c.text for c in m.acceptance_criteria)
     pack = build_pack(
         query,
@@ -257,129 +272,67 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
     prev = state.get("math_spec")
     previous = prev if prev is not None and prev.milestone_id == m.id else None
     failed = state.get("design_attempts", 0)
-    _reference_data(deps)
-    install_data(ws, deps.paths.root)
+    feedback = state.get("design_feedback") or _coordinator_notes(state)
     try:
         out = run_math_designer(
             spec,
             m,
             pack,
             _existing_files(deps),
-            state.get("design_feedback"),
+            feedback,
             deps.ctx(m.id, _briefing(state, "math_designer")),
-            baselines=state.get("baselines", []),
-            baseline_note=state.get("baseline_note") or "",
-            data_files=describe_data(
-                deps.paths.root, deps.settings.budgets.reference_data.agent_chars
-            ),
+            benchmarks=_benchmarks(m, deps),
             proposal=_proposal_text(state, deps),
         )
-    except ContractViolation as e:  # unusable output: a failed design attempt, not a crash
+        written = write_design(ws, out, previous)
+    except (ContractViolation, DesignError) as e:
+        why = f"The previous answer could not be used: {str(e)[:600]}"
+        if failed + 1 < DESIGN_TRIES:
+            return {"design_ok": False, "design_attempts": failed + 1, "design_feedback": why}
+        note = f"{m.id}: the math designer failed twice ({str(e)[:300]}). Simplify or split it."
         return {
-            "redgreen_ok": False,
-            "design_attempts": failed + 1,
-            "design_feedback": f"The previous answer was an invalid design: {str(e)[:600]}",
+            "design_ok": False,
+            "design_attempts": 0,
+            "design_feedback": None,
+            "human_note": note,
         }
-    try:
-        write_design(ws, out, previous)
-        refs = store_reference(deps.reference_dir(m.id), reference_files(out))
-    except (DesignError, ReferenceError) as e:
-        return {
-            "redgreen_ok": False,
-            "design_attempts": failed + 1,
-            "design_feedback": f"The design could not be written: {e}",
-        }
-    criteria = [c.id for c in spec.acceptance_criteria]
-    out = out.model_copy(update={"spec": skip_unchecked(out.spec, criteria)})  # D90
-    contract = write_contract_tests(ws.root, m.id, out.spec.contract_checks)  # D88
-    if contract:
-        out = out.model_copy(
-            update={
-                "spec": out.spec.model_copy(update={"test_files": [*out.spec.test_files, contract]})
-            }
-        )
-    timeout = deps.settings.budgets.sandbox.test_timeout_s
-    checks = run_checks(ws, box, timeout)
-    result, cases = run_tests_detailed(
-        ws, box, run_id=deps.run_id, milestone_id=m.id, timeout_s=timeout, require_frozen=False
-    )
-    ref_cases = None
-    if refs:
-        _, ref_cases = check_reference(
-            ws,
-            deps.reference_dir(m.id),
-            deps.sandbox_for,
-            run_id=deps.run_id,
-            milestone_id=m.id,
-            timeout_s=timeout,
-        )
-    # D87/D88: a check must be red on the stubs for every criterion except those the owner judges
-    # and those covered only by interface checks (stubs already carry the signatures)
-    red = {cid for c in out.spec.sanity_checks for cid in c.criterion_ids} | {
-        cid for c in out.spec.contract_checks if c.kind != "interface" for cid in c.criterion_ids
-    }
-    checked = [
-        c.id
-        for c in spec.acceptance_criteria
-        if c.id not in out.spec.unchecked_criteria
-        and (c.id in red or not _interface_only(c.id, out))
-    ]
-    rg = assess(
-        checked,
-        cases,
-        checks,
-        out.spec.test_files,
-        reference_cases=ref_cases,
-    )
-    sanity = check_sanity(
-        out.spec,
-        ws.root,
-        ref_cases,
-        sanity_packages(ws.root / "src"),
-        criteria=criteria,
-        contract_file=contract,
-        trusted=trusted_modules(ws, [f.path for f in out.files]),
-    )
-    ok = rg.ok and not sanity
-    problems = [] if rg.ok else [rg.describe()]
-    problems += [f"Sanity check: {p}" for p in sanity]
+    stubs = record_stubs(ws.root, written)
+    commit = git.commit(f"{m.id}: math design (stubs)")
+    git.branch(f"wip/{m.id}", commit)
     return {
         "math_spec": out.spec,
-        "redgreen_ok": ok,
-        "test_result": result,
-        "design_attempts": failed if ok else failed + 1,
-        "design_feedback": None if ok else "\n".join(problems),
-        "perf_unmet": rg.perf_unmet,
+        "stubs": stubs,
+        "design_ok": True,
+        "design_attempts": 0,
+        "design_feedback": None,
+        "coder_sessions": 0,
+        "test_result": None,
     }
-
-
-def _interface_only(cid: str, out) -> bool:
-    kinds = {c.kind for c in out.spec.contract_checks if cid in c.criterion_ids}
-    covered_elsewhere = any(cid in c.criterion_ids for c in out.spec.sanity_checks)
-    return kinds == {"interface"} and not covered_elsewhere
-
-
-def freeze_tests(state: PipelineState, deps: RunDeps) -> Update:
-    m = _milestone(state)
-    ws = deps.workspace()
-    git = Git(ws)
-    freeze(ws)
-    commit = git.commit(f"{m.id}: frozen tests, checks, stubs and bench")
-    git.branch(f"wip/{m.id}", commit)
-    return {"frozen_commit": commit, "coder_sessions": 0, "tamper": None, "design_feedback": None}
 
 
 def code(state: PipelineState, deps: RunDeps) -> Update:
-    """One coder session; the harness reruns the tests afterwards (never trusting the session)."""
+    """One coder session; the harness reruns the stub check afterwards (never trusting it)."""
     m = _milestone(state)
     b = deps.settings.budgets
     cfg = deps.settings.models.roles["coder"]
     n = state.get("coder_sessions", 0)
     model = cfg.escalate_to if cfg.escalate_to and n >= b.coder_escalate_after else None
     ws, box = deps.workspace(), deps.sandbox()
+    stubs = state.get("stubs") or []
+    reproduce = reproduce_script(m.id) if m.benchmarks else None
+    timeout = b.sandbox.test_timeout_s
+    git = Git(ws)
+    git.checkout(f"wip/{m.id}")
     tools = CoderTools(
-        ws, box, run_id=deps.run_id, milestone_id=m.id, timeout_s=b.sandbox.test_timeout_s
+        ws,
+        box,
+        run_id=deps.run_id,
+        milestone_id=m.id,
+        timeout_s=timeout,
+        stubs=stubs,
+        reproduce=reproduce,
     )
+    retry = bool(state.get("verify_retry")) and state.get("verification") is not None
     session = run_coder_session(
         state["spec"],
         state["math_spec"],
@@ -387,242 +340,88 @@ def code(state: PipelineState, deps: RunDeps) -> Update:
         tools,
         deps.ctx(m.id, _briefing(state, "coder")),
         model=model,
-        verification=render_verification(state["verification"])
-        if state.get("verify_retry") and state.get("verification") is not None
-        else None,
+        benchmarks=_benchmarks(m, deps),
+        results_file=default_results(m.id),
+        mismatches=render_verification(state["verification"]) if retry else None,
     )
-    attempts = state.get("tamper_attempts", 0) + len(tools.tamper_attempts)
-    update: Update = {
-        "coder_sessions": n + 1,
-        "tamper_attempts": attempts,
-        "coder_message": (session.loop.final_text or "")[:1500] or None,
-    }
-    if tools.disputes:
-        d = tools.disputes[-1]
-        file = d.test_id.split("::", 1)[0].replace(".", "/") + ".py" if "::" in d.test_id else None
-        update |= {
-            "dispute": f"**{d.test_id}**\n\nReason: {d.reason}\n\nEvidence: {d.evidence}",
-            "dispute_file": file,
-        }
-    try:
-        final = run_tests(
-            ws, box, run_id=deps.run_id, milestone_id=m.id, timeout_s=b.sandbox.test_timeout_s
-        )
-    except FrozenTamper as e:
-        return update | {"tamper": str(e)}
-    nothing_to_run = final.n_passed == final.n_failed == 0 and final.frozen_ok
-    if nothing_to_run and not state["math_spec"].test_files:  # D90: every criterion skipped
-        final = final.model_copy(update={"passed": True})
-    git = Git(ws)
+    final = check_code(
+        ws, box, stubs, reproduce, timeout_s=timeout, run_id=deps.run_id, milestone_id=m.id
+    )
     git.commit(f"{m.id}: coder session {n + 1} ({'pass' if final.passed else 'fail'})")
     if final.passed:
         git.checkout("main")
         git.run("merge", "-q", "--ff-only", f"wip/{m.id}")
-    return update | {"test_result": final, "tamper": None, "verify_retry": False}
+    return {
+        "coder_sessions": n + 1,
+        "coder_message": (session.loop.final_text or "")[:1500] or None,
+        "test_result": final,
+        "verify_retry": False,
+    }
 
 
-def _verify(state: PipelineState, deps: RunDeps) -> VerificationReport:
+def compare(state: PipelineState, deps: RunDeps) -> Update:
+    """D93: compare the owner's results file with the reference. Plain Python decides; a wrong
+    value or an incomplete report goes back to the coder at most `max_fix_rounds` times."""
     m = _milestone(state)
     ws = deps.workspace()
-    return run_verify(
-        ws,
-        deps.sandbox_for(ws),
-        timeout_s=deps.settings.budgets.sandbox.bench_timeout_s,
-        run_id=deps.run_id,
-        milestone_id=m.id,
-    )
-
-
-def verify_code(state: PipelineState, deps: RunDeps) -> Update:
-    """Phase 7d: run the frozen verify scripts on passing code; wrong values and crashes in the
-    package go back to the coder (at most `autopilot.max_fix_rounds` times) before simplifying.
-    A failure in a verify script itself goes to the owner instead."""
-    rep = _verify(state, deps)
+    try:
+        path = results_file(ws.root, m.id, state.get("benchmark_path") or "")
+        rep = check_results(
+            path, _reference(deps), m.benchmarks, run_id=deps.run_id, milestone_id=m.id
+        )
+    except BenchmarkFileError as e:
+        return {"benchmark_error": str(e), "verification": None, "verify_retry": False}
     rounds = state.get("fix_rounds", 0)
-    retry = coder_can_fix(rep) and rounds < deps.settings.budgets.autopilot.max_fix_rounds
-    if rep.status != "none":
-        log.warning("verification", extra={"status": rep.status, "mismatched": rep.n_mismatched})
-    return {"verification": rep, "verify_retry": retry, "fix_rounds": rounds + int(retry)}
-
-
-def verify_final(state: PipelineState, deps: RunDeps) -> Update:
-    """Phase 7d: verify again after the optimizer, so the digest reports the final code."""
-    return {"verification": _verify(state, deps), "verify_retry": False}
+    retry = rep.status in ("mismatch", "error") and rounds < (
+        deps.settings.budgets.autopilot.max_fix_rounds
+    )
+    log.warning("benchmarks", extra={"status": rep.status, "mismatched": rep.n_mismatched})
+    return {
+        "verification": rep,
+        "benchmark_error": None,
+        "benchmark_path": None,
+        "verify_retry": retry,
+        "fix_rounds": rounds + int(retry),
+    }
 
 
 def render_verification(rep: VerificationReport | None) -> str:
     """One short paragraph for gates and the coder."""
     if rep is None or rep.status == "none":
-        return "Verification: none (no verify scripts for this milestone)"
+        return "Benchmarks: none for this milestone"
     if rep.status == "verified":
-        return f"Verification: verified ({rep.n_within} of {rep.n_checked} values within tolerance)"
+        return f"Benchmarks: verified ({rep.n_within} of {rep.n_checked} values within tolerance)"
     if rep.status == "unchecked_only":
-        return f"Verification: {rep.n_unchecked} values reported, none checkable (no tolerances)"
+        return f"Benchmarks: {rep.n_unchecked} values reported, none checkable (no tolerances)"
     lines = []
     if rep.status == "mismatch":
         n, of = rep.n_mismatched, rep.n_checked
-        lines.append(f"Verification: mismatch: {n} of {of} values outside tolerance")
+        lines.append(f"Benchmarks: mismatch: {n} of {of} values outside tolerance")
     else:
-        lines.append(f"Verification: error in {', '.join(rep.failed_scripts) or 'a report'}")
+        lines.append("Benchmarks: the results could not be fully checked")
     for mm in rep.mismatches[:8]:
         tol = f" (±{mm.tolerance:g})" if mm.tolerance is not None else " (exact)"
         lines.append(f"- {mm.ref}: generated {mm.generated}, recorded {mm.recorded}{tol}")
-    if rep.status == "error" and rep.log_tail:
+    if rep.log_tail:
         lines.append(rep.log_tail[-800:])
     return "\n".join(lines)
 
 
-def opt_baseline(state: PipelineState, deps: RunDeps) -> Update:
-    """Measure the passing code before simplifying: bench, lines of code, complexity, bench hash."""
-    ms = state["math_spec"]
-    reset: Update = {"opt_outcomes": [], "opt_patches": [], "opt_stop_reason": None}
-    if ms.bench is None:
-        return reset | {"opt_stop_reason": "no benchmark", "opt_baseline_s": None}
-    m = _milestone(state)
-    try:
-        b = baseline(
-            deps.workspace(),
-            deps.sandbox(),
-            ms.bench.entrypoint,
-            deps.settings.budgets,
-            run_id=deps.run_id,
-            milestone_id=m.id,
-        )
-    except BenchFailed as e:  # e.g. a timeout: the tests passed, so skip optimising, keep going
-        return reset | {"opt_stop_reason": f"benchmark failed: {e}", "opt_baseline_s": None}
-    action, reason = decide([], deps.settings.budgets)
-    return reset | {
-        "opt_baseline_s": b.runtime_s,
-        "opt_runtime_s": b.runtime_s,
-        "opt_sloc": b.sloc,
-        "opt_bench_hash": b.bench_hash,
-        "opt_complexity": b.complexity,
-        "opt_stop_reason": reason if action == "stop" else None,
-    }
-
-
-def optimize(state: PipelineState, deps: RunDeps) -> Update:
-    """One simplifier attempt (D85): #6 proposes, the harness keeps or reverts, the rule decides."""
-    m = _milestone(state)
-    ms = state["math_spec"]
-    cfg = deps.settings.budgets
-    ws, box = deps.workspace(), deps.sandbox()
-    outcomes = list(state.get("opt_outcomes", []))
-    patches = list(state.get("opt_patches", []))
-    attempt = len(outcomes) + 1
-    current = Baseline(
-        state["opt_runtime_s"],
-        0.0,
-        state["opt_sloc"],
-        state["opt_bench_hash"],
-        state["opt_complexity"],
-    )
-    try:
-        patch = run_optimizer(
-            source_listing(ws),
-            current.complexity,
-            current.runtime_s,
-            ms,
-            notes(patches, outcomes),
-            deps.ctx(m.id, _briefing(state, "optimizer")),
-        )
-    except BudgetExceeded as e:
-        return {"opt_stop_reason": f"budget exhausted ({e})"}  # D40
-    except ContractViolation as e:
-        patch = None
-        outcome = OptimizationOutcome(
-            created_by="harness",
-            run_id=deps.run_id,
-            milestone_id=m.id,
-            attempt=attempt,
-            accepted=False,
-            reason=f"rejected: no valid patch ({str(e)[:200]})",
-            runtime_before_s=current.runtime_s,
-            sloc_before=current.sloc,
-            complexity_before=current.complexity,
-        )
-    else:
-        try:
-            outcome = try_patch(
-                ws,
-                box,
-                Git(ws),
-                patch,
-                current,
-                attempt,
-                ms.bench.entrypoint,
-                cfg,
-                run_id=deps.run_id,
-                milestone_id=m.id,
-            )
-        except FrozenTamper as e:
-            return {"tamper": str(e)}
-    update: Update = {}
-    if outcome.accepted:
-        update |= {
-            "opt_runtime_s": outcome.runtime_after_s,
-            "opt_sloc": outcome.sloc_after,
-            "opt_complexity": outcome.complexity_after,
-        }
-    outcomes.append(outcome)
-    patches.append(patch)
-    action, reason = decide(outcomes, cfg)
-    return update | {
-        "opt_outcomes": outcomes,
-        "opt_patches": patches,
-        "opt_stop_reason": reason if action == "stop" else None,
-    }
-
-
 def digest(state: PipelineState, deps: RunDeps) -> Update:
     m = _milestone(state)
-    ws, box = deps.workspace(), deps.sandbox()
-    result, cases = run_tests_detailed(
-        ws,
-        box,
-        run_id=deps.run_id,
-        milestone_id=m.id,
-        timeout_s=deps.settings.budgets.sandbox.test_timeout_s,
-    )
+    check = state["test_result"]
     d = build_digest(
         state["spec"],
-        cases,
+        check,
+        state.get("verification"),
         deps.ledger,
         run_id=deps.run_id,
         milestone_id=m.id,
-        test_files=state["math_spec"].test_files,
-        runtime_baseline_s=state.get("opt_baseline_s"),
-        runtime_final_s=state.get("opt_runtime_s"),
-        optimizer_attempts=len(state.get("opt_outcomes", [])),
-        optimizer_stop=state.get("opt_stop_reason"),
-        unchecked=state["math_spec"].unchecked_criteria,
     )
-    ver = state.get("verification")
-    if ver is not None and ver.status != "none":
-        metrics = {
-            **d.metrics,
-            "verification_checked": float(ver.n_checked),
-            "verification_within": float(ver.n_within),
-            "verification_mismatched": float(ver.n_mismatched),
-            "verification_unchecked": float(ver.n_unchecked),
-        }
-        bad = ver.status in ("mismatch", "error")
-        status = "partial" if bad and d.status == "met" else d.status
-        dev = d.deviations
-        if bad:
-            dev = f"{dev} Verification {ver.status}: {ver.n_mismatched} value(s) off.".strip()
-        d = d.model_validate(
-            {**d.model_dump(), "metrics": metrics, "status": status, "deviations": dev[:500]}
-        )
-    if any(c.checked and not c.passed for c in d.criteria):  # skipped ones are the owner's
-        note = write_deviations(state["spec"], d, result, deps.ctx(m.id))
-        extra = (
-            f" Optimizer stopped: {state['opt_stop_reason']}."
-            if state.get("opt_stop_reason")
-            else ""
-        )
-        d = d.model_validate({**d.model_dump(), "deviations": (note + extra)[:500]})
-    return {"digest": d, "test_result": result}
+    if d.status != "met":
+        note = write_deviations(state["spec"], d, check, deps.ctx(m.id))
+        d = d.model_validate({**d.model_dump(), "deviations": note[:500]})
+    return {"digest": d}
 
 
 def finish(state: PipelineState, deps: RunDeps) -> Update:
@@ -676,22 +475,6 @@ def _ask(state: PipelineState, deps: RunDeps, req: GateRequest) -> HumanDecision
     return HumanDecision.model_validate(interrupt(req.model_dump()))
 
 
-def _decisions(deps: RunDeps) -> list[dict]:
-    path = deps.paths.root / DECISIONS_LOG
-    return [json.loads(x) for x in path.read_text().splitlines()] if path.is_file() else []
-
-
-def _cites_data(state: PipelineState, deps: RunDeps, m: Milestone | None) -> bool:
-    """D84: do this milestone's criteria refer to the owner's recorded data?"""
-    stems = [Path(n).stem for n in _reference_data(deps)]
-    if not stems or m is None:
-        return False
-    spec = state.get("spec")
-    crits = [*m.acceptance_criteria, *(spec.acceptance_criteria if spec is not None else [])]
-    text = " ".join(c.text for c in crits)
-    return DATA_DIR in text or any(s in text for s in stems)
-
-
 def _autopilot(state: PipelineState, deps: RunDeps, gate: str) -> HumanDecision | None:
     """Phase 7d (D76): plain-Python decision for routine gates, logged; None asks the human."""
     cfg = deps.settings.budgets.autopilot
@@ -700,23 +483,16 @@ def _autopilot(state: PipelineState, deps: RunDeps, gate: str) -> HumanDecision 
     rm = state.get("roadmap")
     m = next_milestone(rm) if rm is not None else None
     mid = m.id if m is not None else None
-    mine = [e for e in _decisions(deps) if e.get("milestone") == mid]
-    redirects = [e for e in mine if e["action"] == "redirect"]
     flags = list(state.get("flags") or [])
-    spent = {t for e in redirects for t in e.get("acted_on", [])}  # flags a redirect already used
     res = state.get("test_result")
     facts = Facts(
         run_id=deps.run_id,
         milestone_id=mid,
-        flags=[f for f in flags if f.text not in spent],
-        redgreen_ok=bool(state.get("redgreen_ok", True)),
+        flags=flags,
         tests_passed=None if res is None else res.passed,
         verification=state.get("verification"),
-        auto_redirects=len(redirects),
         first_roadmap=state.get("approved_roadmap") is None,
-        design_feedback=state.get("design_feedback") or "",
-        cites_data=_cites_data(state, deps, m),
-        unchecked=sorted(ms.unchecked_criteria) if (ms := state.get("math_spec")) else [],
+        has_benchmarks=bool(m is not None and m.benchmarks),
     )
     d = decide_gate(gate, facts, cfg)
     if d is None:
@@ -727,9 +503,6 @@ def _autopilot(state: PipelineState, deps: RunDeps, gate: str) -> HumanDecision 
         "milestone": mid,
         "action": d.action,
         "note": d.note,
-        "acted_on": [f.text for f in facts.flags if f.severity == "high"]
-        if d.action == "redirect"
-        else [],
     }
     with (deps.paths.root / DECISIONS_LOG).open("a") as f:
         f.write(json.dumps(entry) + "\n")
@@ -794,12 +567,11 @@ def oversee(state: PipelineState, deps: RunDeps, point: OversightPoint) -> Updat
     lim = deps.settings.budgets.overseer
     m = next_milestone(state["roadmap"]) if point != "plan" else None
     files: dict[str, str] = {}
-    ms = state.get("math_spec")
-    if point in ("design", "design_gate", "tests", "code") and ms is not None:
+    if point in ("design", "code"):  # the code itself; never the reference values (D93)
         root = deps.workspace().root
-        files = {p: (root / p).read_text() for p in ms.test_files if (root / p).is_file()}
-    data = describe_data(deps.paths.root, deps.settings.budgets.reference_data.agent_chars)
-    evidence = collect_evidence(state, point, files, lim.evidence_chars, data=data)
+        paths = dict.fromkeys(s["path"] for s in state.get("stubs") or [])
+        files = {p: (root / p).read_text() for p in paths if (root / p).is_file()}
+    evidence = collect_evidence(state, point, files, lim.evidence_chars)
     mid = m.id if m is not None else None
     report = run_overseer(
         point,
@@ -830,7 +602,13 @@ def roadmap_gate(state: PipelineState, deps: RunDeps) -> Update:
     rm = state["roadmap"]
     first = state.get("approved_roadmap") is None
     title = "Approve the first roadmap" if first else f"Approve roadmap changes (v{rm.version})"
-    d = _ask(state, deps, gate_request("roadmap", title, rm))
+    req = gate_request("roadmap", title, rm)
+    brief = state.get("brief")
+    if brief is not None and brief.benchmarks and any(m.benchmarks for m in rm.milestones):
+        req = req.model_copy(
+            update={"markdown": req.markdown + "\n\n" + _render_benchmarks(brief.benchmarks)}
+        )
+    d = _ask(state, deps, req)
     # the flags were about this roadmap: settled by the owner's decision either way (the
     # briefings stay: they guide the planners)
     update: Update = {"human_decision": d, "flags": []}
@@ -847,35 +625,9 @@ def roadmap_gate(state: PipelineState, deps: RunDeps) -> Update:
     return update
 
 
-def escalation_gate(state: PipelineState, deps: RunDeps) -> Update:
-    spec, verdict = state["spec"], state["verdict"]
-    title = f"{spec.milestone_id}: spec still failing review after {state['revise_rounds']} rounds"
-    req = GateRequest(
-        gate="escalation",
-        title=title,
-        markdown=render(verdict) + "\n\n" + render(spec),
-        contract_type="MilestoneSpec",
-        contract_json=spec.model_dump_json(),
-    )
-    d = _ask(state, deps, req)
-    update: Update = {"human_decision": d}
-    if d.action == "edit":
-        if not isinstance(d.edited, MilestoneSpec):
-            raise ValueError("an edit at the escalation gate must supply a MilestoneSpec")
-        update["spec"] = d.edited
-    elif d.action == "redirect":
-        update |= {"human_note": d.note, "revise_rounds": 0}
-    elif d.action == "stop":
-        update["status"] = "stopped"
-    return update
-
-
 def result_gate(state: PipelineState, deps: RunDeps) -> Update:
     digest = state["digest"]
     md = render(digest) + "\n\n" + render_verification(state.get("verification"))
-    attempts = render_attempts(state.get("opt_patches", []), state.get("opt_outcomes", []))
-    if attempts:
-        md += "\n\n" + attempts
     d = _ask(
         state,
         deps,
@@ -890,33 +642,23 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
         "spec": None,
         "verdict": None,
         "revise_rounds": 0,
-        "human_note": d.note or None,
+        # an autopilot approval's note explains itself; only the owner's notes ask for a replan
+        "human_note": (d.note or None) if d.created_by == "human" else None,
         "math_spec": None,
+        "stubs": [],
         "design_attempts": 0,
         "design_feedback": None,
-        "frozen_commit": None,
         "test_result": None,
         "coder_sessions": 0,
-        "tamper": None,
-        "opt_outcomes": [],
-        "opt_patches": [],
-        "opt_baseline_s": None,
-        "opt_runtime_s": None,
-        "opt_profile": None,
-        "opt_stop_reason": None,
-        "opt_bench_hash": None,
-        "baselines": [],
-        "baseline_note": None,
-        "perf_unmet": [],
         "verification": None,
+        "benchmark_path": None,
+        "benchmark_error": None,
         "fix_rounds": 0,
         "verify_retry": False,
         "briefings": dict(state.get("carry_briefings") or {}),
         "carry_briefings": {},
         "flags": [],
         "oversee_calls": 0,
-        "dispute": None,
-        "dispute_file": None,
         "coder_message": None,
     }
     if d.action in ("approve", "edit"):
@@ -929,55 +671,6 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
     return update
 
 
-def tests_gate(state: PipelineState, deps: RunDeps) -> Update:
-    ms = state["math_spec"]
-    files = render_files(deps.workspace().root, [*ms.test_files, *ms.check_files])
-    md = (
-        render(ms) + "\n\nAll criteria fail on the stubs with NotImplementedError, and every "
-        "correctness test passes on the designer's reference solution.\n\n"
-        + _render_perf(test_names(deps.workspace().root, ms.test_files), state)
-        + _render_baselines(state)
-        + "\n\n"
-        + files
-    )
-    d = _ask(
-        state,
-        deps,
-        GateRequest(
-            gate="tests", title=f"Review {ms.milestone_id}'s tests before coding", markdown=md
-        ),
-    )
-    if d.action == "stop":
-        return {"human_decision": d, "status": "stopped"}
-    if d.action == "redirect":
-        return {
-            "human_decision": d,
-            "design_attempts": 0,
-            "design_feedback": f"The owner reviewed the tests and asks: {d.note}",
-            "flags": [],
-            "briefings": {},
-        }
-    return {"human_decision": d}
-
-
-def design_gate(state: PipelineState, deps: RunDeps) -> Update:
-    ms = state.get("math_spec")
-    md = f"## The math designer failed twice\n\n{state.get('design_feedback') or ''}"
-    if ms is not None:
-        md += "\n\n" + render(ms)
-    d = _ask(
-        state,
-        deps,
-        GateRequest(gate="design", title="Tests are not red for the right reason", markdown=md),
-    )
-    update: Update = {"human_decision": d}
-    if d.action == "stop":
-        update["status"] = "stopped"
-    elif d.action == "redirect":  # fresh advice for the redesign: earlier flags are spent
-        update |= {"human_note": d.note, "flags": [], "briefings": {}}
-    return update
-
-
 def coder_gate(state: PipelineState, deps: RunDeps) -> Update:
     r = state["test_result"]
     md = f"{state.get('coder_sessions', 0)} coder sessions used.\n\n" + render(r)
@@ -986,7 +679,7 @@ def coder_gate(state: PipelineState, deps: RunDeps) -> Update:
     d = _ask(
         state,
         deps,
-        GateRequest(gate="coder", title=f"{r.milestone_id}: tests still failing", markdown=md),
+        GateRequest(gate="coder", title=f"{r.milestone_id}: code check still failing", markdown=md),
     )
     update: Update = {"human_decision": d}
     if d.action == "stop":
@@ -999,23 +692,6 @@ def coder_gate(state: PipelineState, deps: RunDeps) -> Update:
         git.checkout("main")
         git.run("merge", "-q", "--ff-only", f"wip/{m.id}")
     return update
-
-
-def tamper_gate(state: PipelineState, deps: RunDeps) -> Update:
-    md = (
-        f"## Frozen tests were modified\n\n{state.get('tamper')}\n\n"
-        f"Blocked write attempts so far: {state.get('tamper_attempts', 0)}.\n\n"
-        "Approve restores the frozen files from git and lets the coder continue."
-    )
-    d = _ask(state, deps, GateRequest(gate="tamper", title="Tamper detected", markdown=md))
-    update: Update = {"human_decision": d}
-    if d.action == "stop":
-        return update | {"status": "stopped"}
-    if d.action == "redirect":
-        return update | {"human_note": d.note}
-    ws = deps.workspace()
-    restore(ws, Git(ws), state["frozen_commit"])
-    return update | {"tamper": None}
 
 
 def budget_gate(state: PipelineState, deps: RunDeps) -> Update:
@@ -1046,117 +722,48 @@ def budget_gate(state: PipelineState, deps: RunDeps) -> Update:
     return update | {"budget_retry": blocked}
 
 
-def _render_perf(names: list[str], state: PipelineState) -> str:
-    """D60: speed targets are listed apart so a weakened number is easy to spot."""
-    perf = [n for n in names if CaseOutcome("", "", n, "passed", "").is_perf]
-    if not perf:
-        return ""
-    unmet = {t.rsplit("::", 1)[-1] for t in state.get("perf_unmet", [])}
-    lines = ["**Performance tests** (targets the coder must meet; compare with the criteria)"]
-    for n in perf:
-        note = " · not met by the reference (allowed)" if n in unmet else ""
-        lines.append(f"- {n}{note}")
-    return "\n".join(lines) + "\n\n"
-
-
-def _render_baselines(state: PipelineState) -> str:
-    cards = state.get("baselines", [])
-    lines = [f"**Published baselines** ({state.get('baseline_note') or 'none'})"]
-    for b in cards:
-        val = f"{b.value:g} {b.units}".strip() if b.value is not None else "(qualitative)"
-        lines.append(f'- {b.criterion_id}: {b.claim} = {val} · "{b.quote}" · {b.source_url}')
+def _render_benchmarks(benchmarks) -> str:
+    lines = ["**Benchmarks from the proposal and papers** (check the values and quotes)"]
+    for b in benchmarks:
+        units = f" {b.units}" if b.units else ""
+        mark = "" if b.verified else " · ⚑ quote not found in the source"
+        lines.append(
+            f"- benchmarks.{b.id}: {b.quantity} = {b.value:g}{units} (±{b.tolerance:g}) · "
+            f'{b.source}: "{b.quote}"{mark}'
+        )
     return "\n".join(lines)
 
 
-def dispute_gate(state: PipelineState, deps: RunDeps) -> Update:
-    """D56: the coder says a frozen test can never pass. Approve lets #4 revise that file only."""
-    md = f"## The coder disputes a frozen test\n\n{state.get('dispute')}"
-    if state.get("coder_message"):
-        md += f"\n\n**The coder's last message**\n\n{state['coder_message']}"
-    if state.get("test_result") is not None:
-        md += "\n\n" + render(state["test_result"])
-    if state.get("dispute_file"):
-        md += "\n\n" + render_files(deps.workspace().root, [state["dispute_file"]])
-    md += (
-        "\n\nApprove lets the math designer revise only this test file; the revision must "
-        "pass on its reference solution and is re-frozen and committed as owner-approved."
+def benchmark_gate(state: PipelineState, deps: RunDeps) -> Update:
+    """D93: the owner runs the reproduce script; approve means the results file is ready."""
+    m = _milestone(state)
+    ws = deps.workspace()
+    script = reproduce_script(m.id)
+    out = default_results(m.id)
+    refs = "\n".join(
+        f"- `{b['ref']}`" + (f": {b['quantity']}" if b.get("quantity") else "")
+        for b in _benchmarks(m, deps)[:40]
     )
-    d = _ask(
-        state, deps, GateRequest(gate="dispute", title="Test disputed by the coder", markdown=md)
+    md = (
+        f"## {m.id}: benchmark run needed\n\nThe code passes its check. Run the reproduce script "
+        f"yourself (it may take a while), then approve:\n\n"
+        f'```\ncd "{ws.root}"\nPYTHONPATH=src python {script}\n```\n\n'
+        f"It writes `{out}`. Approve reads that file; to use another file, give its path "
+        f"(relative to the workspace or absolute). Python compares the values with the reference "
+        f"and tolerances.\n\n**Values to reproduce**\n{refs or '- (none listed)'}"
     )
+    if state.get("benchmark_error"):
+        md = f"**The last results file could not be used:** {state['benchmark_error']}\n\n" + md
+    req = GateRequest(
+        gate="benchmark",
+        title=f"{m.id}: run the benchmarks",
+        markdown=md,
+        path_prompt=f"Results file (Enter for {out}): ",
+    )
+    d = _ask(state, deps, req)
     update: Update = {"human_decision": d}
     if d.action == "stop":
         return update | {"status": "stopped"}
     if d.action == "redirect":
-        return update | {"human_note": d.note, "dispute": None}
-    return update
-
-
-def revise_test(state: PipelineState, deps: RunDeps) -> Update:
-    """#4 rewrites only the disputed test file; it must pass on the stored reference (D56)."""
-    m = _milestone(state)
-    file = state.get("dispute_file")
-    ws = deps.workspace()
-    git = Git(ws)
-    feedback = (
-        f"The owner accepted the coder's dispute of a frozen test:\n{state.get('dispute')}\n"
-        f"Rewrite ONLY {file}. Keep every other file exactly as it is."
-        + (
-            " It is generated from spec.contract_checks: correct the disputed entry there."
-            if file and file.startswith(CONTRACT_DIR + "/")
-            else ""
-        )
-    )
-    fail: Update = {"dispute": None, "coder_message": "Test revision failed; see the dispute."}
-    if not file or not deps.reference_dir(m.id).is_dir():
-        return fail | {"coder_message": "No reference solution stored; the test cannot be revised."}
-    try:
-        out = run_math_designer(
-            state["spec"],
-            m,
-            build_pack("", 1, 1, deps.index, deps.blobs),
-            _existing_files(deps),
-            feedback,
-            deps.ctx(m.id, _briefing(state, "math_designer")),
-            baselines=state.get("baselines", []),
-            data_files=describe_data(
-                deps.paths.root, deps.settings.budgets.reference_data.agent_chars
-            ),
-            proposal=_proposal_text(state, deps),
-        )
-    except ContractViolation:
-        return fail
-    if file.startswith(CONTRACT_DIR + "/"):  # D88: generated; the designer corrects the data
-        if not out.spec.contract_checks:
-            return fail
-        content = render_contract(m.id, out.spec.contract_checks)
-    else:
-        new = [f for f in out.files if f.path == file and f.purpose == "test"]
-        if not new:
-            return fail
-        content = new[0].content
-    target = ws.root / file
-    target.chmod(0o644)
-    target.write_text(content)
-    timeout = deps.settings.budgets.sandbox.test_timeout_s
-    _, ref_cases = check_reference(
-        ws,
-        deps.reference_dir(m.id),
-        deps.sandbox_for,
-        run_id=deps.run_id,
-        milestone_id=m.id,
-        timeout_s=timeout,
-    )
-    if not ref_cases or any(c.misses_reference for c in ref_cases):
-        git.run("checkout", "HEAD", "--", file)  # revert to the frozen version
-        freeze(ws)
-        return fail | {"coder_message": "The revised test still fails on the reference solution."}
-    freeze(ws)
-    commit = git.commit(f"{m.id}: owner-approved revision of {file} after a coder dispute")
-    return {
-        "dispute": None,
-        "dispute_file": None,
-        "coder_sessions": 0,
-        "frozen_commit": commit,
-        "coder_message": None,
-    }
+        return update | {"human_note": d.note}
+    return update | {"benchmark_path": d.note.strip() or None}

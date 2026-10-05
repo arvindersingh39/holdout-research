@@ -127,31 +127,37 @@ def test_config_loads(ctx: CallContext) -> None:
     assert role.model == "anthropic/claude-opus-5-5" and role.thinking_budget == 2000
 
 
-def test_result_evidence_says_totals_include_earlier_milestones() -> None:
-    from r2r.contracts import CriterionResult, ResultDigest
+def test_result_evidence_has_the_digest_and_benchmark_comparison() -> None:
+    from r2r.contracts import CriterionResult, Mismatch, ResultDigest, VerificationReport
 
     d = ResultDigest(
         created_by="harness",
         run_id="r",
         milestone_id="M2",
-        status="met",
-        criteria=[CriterionResult(id="AC1", passed=True, evidence="3/3 tests pass")],
-        metrics={"tests_passed": 12.0},
+        status="partial",
+        criteria=[CriterionResult(id="AC1", passed=True, evidence="implemented", checked=False)],
         cost_usd=0.1,
         tokens=1,
     )
-    ev = collect_evidence({"roadmap": roadmap(), "digest": d}, "result")
-    digest = next(e for e in ev if e.kind == "digest")
-    assert "earlier milestones" in digest.text
+    ver = VerificationReport(
+        created_by="harness",
+        run_id="r",
+        milestone_id="M2",
+        status="mismatch",
+        n_checked=1,
+        n_mismatched=1,
+        mismatches=[Mismatch(ref="benchmarks.BM1", generated=0.5, recorded=0.41, tolerance=0.01)],
+    )
+    ev = collect_evidence({"roadmap": roadmap(), "digest": d, "verification": ver}, "result")
+    kinds = {e.kind: e.text for e in ev}
+    assert "partial" in kinds["digest"] and "0.41" in kinds["benchmark_comparison"]
 
 
-def test_reference_data_is_evidence_at_design_points() -> None:
-    data = {"tests/frozen/data/recorded.json": '{"R0": 12.6}'}
-    ev = collect_evidence({"roadmap": roadmap()}, "design", data=data)
-    ref = [e for e in ev if e.kind == "reference_data"]
-    assert ref and "tests/frozen/data/recorded.json" in ref[0].text and "12.6" in ref[0].text
-    assert not [
-        e
-        for e in collect_evidence({"roadmap": roadmap()}, "result", data=data)
-        if e.kind == "reference_data"
-    ]
+def test_design_evidence_never_has_reference_values() -> None:
+    """D93: briefings reach the designer and coder, so the overseer sees no recorded values
+    before the result; it reads the stubs instead."""
+    ev = collect_evidence(
+        {"roadmap": roadmap(), "verification": None}, "design", files={"src/a.py": "def f(): ..."}
+    )
+    assert [e for e in ev if e.kind == "code_file" and "def f" in e.text]
+    assert not [e for e in ev if e.kind in ("reference_data", "benchmark_comparison")]

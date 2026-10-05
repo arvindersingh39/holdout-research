@@ -1,28 +1,26 @@
-"""#4 Math designer: MathSpec plus frozen tests, checks, stubs and bench (Phase 5).
+"""#4 Math designer: the formulation and the code stubs of one milestone (D93).
 
-Tests are written before any code exists. The design node writes the files through
-`write_design`, proves red before green, and passes only the `MathSpec` downstream.
+No tests, checks or reference solutions: the designer states the mathematics exactly and writes
+stubs with the final signatures; the coder implements them and the stub check (plain Python)
+confirms every stub is implemented.
 """
 
 from __future__ import annotations
 
-import json
-
 from pydantic import BaseModel
 
-from r2r.contracts import BaselineCard, FileSpec, MathDesign, MathSpec, Milestone, MilestoneSpec
+from r2r.contracts import MathDesign, MathSpec, Milestone, MilestoneSpec
 from r2r.harness.gitops import Git
-from r2r.harness.refdata import DATA_DIR
 from r2r.harness.workspace import UnsafePath, Workspace, safe_path
 from r2r.llm.gateway import CallContext, call_structured
 from r2r.retrieval.context_pack import ContextPack
 
 ROLE = "math_designer"
-DESIGN_DIRS = ("tests/frozen", "checks", "src", "bench", "figures")
+DESIGN_DIRS = ("src", "bench", "figures")
 
 
 class DesignError(ValueError):
-    """The design can't be written as given (path, overwrite or frozen-file conflict)."""
+    """The design can't be written as given (a path, or an overwrite of earlier code)."""
 
 
 class DesignInput(BaseModel):
@@ -30,10 +28,8 @@ class DesignInput(BaseModel):
     milestone: Milestone
     context: str  # retrieved chunks, each inside <document> tags
     existing_files: list[str]  # files already in the workspace (earlier milestones)
-    feedback: str | None = None  # why the previous design was rejected
-    baselines: list[BaselineCard] = []  # quote-verified published values (D52)
-    baseline_note: str = ""
-    data_files: dict[str, str] = {}  # owner's recorded values, path -> content (D71)
+    feedback: str | None = None  # why the previous design was rejected, or coordinator notes
+    benchmarks: list[dict[str, str]] = []  # refs to reproduce with descriptions; never values
     proposal: str = ""  # the owner's full proposal when short, inside <document> tags
 
 
@@ -44,9 +40,7 @@ def run_math_designer(
     existing_files: list[str],
     feedback: str | None,
     ctx: CallContext,
-    baselines: list[BaselineCard] | None = None,
-    baseline_note: str = "",
-    data_files: dict[str, str] | None = None,
+    benchmarks: list[dict[str, str]] | None = None,
     proposal: str = "",
 ) -> MathDesign:
     payload = DesignInput(
@@ -55,32 +49,10 @@ def run_math_designer(
         context=pack.text,
         existing_files=existing_files,
         feedback=feedback,
-        baselines=baselines or [],
-        baseline_note=baseline_note,
-        data_files=data_files or {},
+        benchmarks=benchmarks or [],
         proposal=proposal,
     )
     return call_structured(ROLE, ROLE, payload, MathDesign, ctx)
-
-
-def reference_files(design: MathDesign) -> list[FileSpec]:
-    return [f for f in design.files if f.purpose == "reference"]
-
-
-def _frozen_files(ws: Workspace) -> set[str]:
-    if not ws.frozen_manifest.is_file():
-        return set()
-    return set(json.loads(ws.frozen_manifest.read_text())["files"])
-
-
-def _remove_leftovers(ws: Workspace, frozen: set[str]) -> None:
-    """Files under tests/frozen/ and checks/ that no milestone froze are leftovers of rejected
-    designs; they would fail every later design's reference check (study-3). Owner data stays."""
-    for top in ("tests/frozen", "checks"):
-        for p in sorted((ws.root / top).rglob("*")):
-            rel = p.relative_to(ws.root).as_posix()
-            if p.is_file() and rel not in frozen and not rel.startswith(DATA_DIR + "/"):
-                p.unlink()
 
 
 def _reset_code(ws: Workspace) -> None:
@@ -96,30 +68,19 @@ def _reset_code(ws: Workspace) -> None:
 
 
 def write_design(ws: Workspace, design: MathDesign, previous: MathSpec | None) -> list[str]:
-    """Write the design's files. Never overwrites frozen files or code from earlier milestones;
-    uncommitted files of earlier attempts are removed first."""
-    frozen = _frozen_files(ws)
-    _remove_leftovers(ws, frozen)
+    """Write the stubs. Never overwrites code from earlier milestones; uncommitted files of earlier
+    attempts are removed first."""
     _reset_code(ws)
     if previous is not None:
-        old = [*previous.test_files, *previous.check_files, *previous.figure_scripts]
-        if previous.bench:
-            old.append(previous.bench.entrypoint)
-        for rel in old:
-            if rel not in frozen:
+        for rel in previous.figure_scripts:
+            if not Git(ws).run("ls-files", "--", rel).strip():
                 (ws.root / rel).unlink(missing_ok=True)
     targets = []
     for f in design.files:
-        if f.purpose == "reference":
-            continue  # kept outside the workspace (D54)
         try:
-            path = safe_path(ws.root, f.path, DESIGN_DIRS, allow_frozen=True)
+            path = safe_path(ws.root, f.path, DESIGN_DIRS)
         except UnsafePath as e:
             raise DesignError(str(e)) from None
-        if f.path.startswith(DATA_DIR + "/"):
-            raise DesignError(f"{f.path} is the owner's reference data (read-only); load it")
-        if f.path in frozen:
-            raise DesignError(f"{f.path} is a frozen file from an earlier milestone")
         if f.path.startswith("src/") and path.exists() and path.read_text():
             raise DesignError(f"{f.path} already exists: add new modules instead of rewriting it")
         targets.append((f, path))

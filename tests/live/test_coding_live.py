@@ -1,9 +1,7 @@
-"""Live Phase 5 run on pilot milestone M1, in two steps. Run only with R2R_LIVE=1 after approval.
+"""Live D93 run on pilot milestone M1. Run only with R2R_LIVE=1 after approval.
 
-Step 1 (`-k design`, ≈ $0.20-0.45): retrieve → roadmap → spec → #4 design → red before green →
-pauses at the tests gate. The run id is saved to runs/live-coding.latest for step 2.
-Step 2 (`-k code`, ≈ $0.30-1.50, cap $3): approves the tests gate (after the owner reviewed them)
-→ freeze → coder sessions in Docker → digest → stops at the result gate.
+`-k design_and_code` (≈ $0.50-2.00, cap $3): retrieve → roadmap → spec → #4 formulation and stubs →
+coder sessions with the stub check in Docker → digest → stops at the result gate.
 """
 
 import sys
@@ -17,7 +15,7 @@ from r2r.contracts import HumanDecision
 from r2r.graph.deps import RunDeps
 from r2r.graph.driver import drive, open_graph
 from r2r.graph.gates import GateRequest
-from r2r.graph.render import render, render_files
+from r2r.graph.render import render
 from r2r.llm.client import LiteLLMClient
 from r2r.settings import load_settings
 
@@ -38,8 +36,7 @@ class Channel:
         if req.gate in self.pause:
             return None
         action = "approve" if req.gate in self.approve else "stop"
-        if req.gate != "tests":
-            console.print(Markdown(req.markdown))
+        console.print(Markdown(req.markdown))
         return HumanDecision(created_by="human", run_id=run_id, action=action)
 
 
@@ -55,42 +52,20 @@ def _spend(deps: RunDeps, run_id: str) -> float:
     return total
 
 
-def test_design() -> None:
+def test_design_and_code() -> None:
     settings = load_settings(REPO / "config", REPO / ".env")
     run_id = f"live-coding-{datetime.now():%Y%m%d-%H%M%S}"
     deps = RunDeps.create(
         run_id, PILOT, settings, LiteLLMClient(settings.secrets), REPO, REPO / "prompts"
     )
     LATEST.write_text(run_id)
-    ch = Channel(approve={"roadmap"}, pause={"tests"})
+    ch = Channel(approve={"roadmap"}, pause=set())
     with open_graph(deps) as graph:
         res = drive(graph, run_id, ch, start=True)
     state = res.state
-    assert res.status == "paused" and ch.gates[-1].gate == "tests", [g.gate for g in ch.gates]
-    assert state["redgreen_ok"]
-    ms = state["math_spec"]
-    console.print(Markdown(render(state["spec"])))
-    console.print(Markdown(render(ms)))
-    console.print(Markdown(render_files(deps.workspace().root, [*ms.test_files, *ms.check_files])))
-    console.print(f"design attempts that failed: {state.get('design_attempts', 0)}")
-    console.print(f"run id: {run_id}  (saved to {LATEST.relative_to(REPO)})")
-    assert _spend(deps, run_id) < 1.0
-
-
-def test_code() -> None:
-    settings = load_settings(REPO / "config", REPO / ".env")
-    run_id = LATEST.read_text().strip()
-    deps = RunDeps.load(run_id, settings, LiteLLMClient(settings.secrets), REPO, REPO / "prompts")
-    ch = Channel(approve={"tests"}, pause=set())
-    with open_graph(deps) as graph:
-        res = drive(graph, run_id, ch, start=False)
-    state = res.state
-    console.print(
-        f"gates: {[g.gate for g in ch.gates]} · coder sessions: "
-        f"{state.get('coder_sessions')} · blocked tamper attempts: "
-        f"{state.get('tamper_attempts', 0)}"
-    )
+    console.print(Markdown(render(state["math_spec"])))
     console.print(Markdown(render(state["test_result"])))
+    console.print(f"gates: {[g.gate for g in ch.gates]} · sessions: {state.get('coder_sessions')}")
     assert ch.gates[-1].gate == "result", [g.gate for g in ch.gates]
     assert state["test_result"].passed
     assert deps.ledger.spent(run_id, "M1") <= settings.budgets.usd_cap_milestone

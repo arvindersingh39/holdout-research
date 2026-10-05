@@ -74,7 +74,7 @@ def test_arxiv_paper_compiles_offline_with_figure(tmp_path: Path) -> None:
     assert res.figures == ["figures/magnetization.png"]
 
 
-def test_wheel_installs_and_frozen_tests_pass_in_clean_sandbox(tmp_path: Path) -> None:
+def test_wheel_installs_and_imports_in_clean_sandbox(tmp_path: Path) -> None:
     from r2r.publish.package import assemble_package, build_wheel, verify_wheel
 
     image = ensure_image()
@@ -83,9 +83,6 @@ def test_wheel_installs_and_frozen_tests_pass_in_clean_sandbox(tmp_path: Path) -
     (ws.root / "src/sq/__init__.py").write_text("")
     (ws.root / "src/sq/core.py").write_text(
         "import numpy as np\n\n\ndef square(x):\n    return np.square(x)\n"
-    )
-    (ws.root / "tests/frozen/test_m1.py").write_text(
-        "from sq.core import square\n\n\ndef test_AC1__square():\n    assert square(3) == 9\n"
     )
     rec = RunRecord(
         roadmap(),
@@ -102,4 +99,4 @@ def test_wheel_installs_and_frozen_tests_pass_in_clean_sandbox(tmp_path: Path) -
         lambda w: DockerBackend(w, SETTINGS.budgets.sandbox, image=image),
         tmp_path / "verify",
     )
-    assert res.passed and res.n_passed == 1, res.log_tail
+    assert res.passed and res.n_passed == 2, res.log_tail  # sq and sq.core

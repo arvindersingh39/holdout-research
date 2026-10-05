@@ -43,6 +43,24 @@ def _short_list(max_items: int, max_chars: int = 300):
     return Annotated[list[Text(max_chars, 1)], Field(max_length=max_items)]
 
 
+BenchmarkRef = Annotated[str, Field(pattern=r"^[A-Za-z_][\w.\[\]-]{0,199}$")]
+
+
+class Benchmark(Part):
+    """D93: an experimental result stated in the proposal or a paper, to be reproduced. `verified`
+    is set by code: the quote occurs in the source text and contains the value."""
+
+    id: Annotated[str, Field(pattern=r"^BM\d{1,3}$")]
+    quantity: Text(200, 1)
+    value: float
+    units: Text(60) = ""
+    tolerance: Annotated[float, Field(ge=0)]  # half a unit of the last printed digit
+    conditions: Text(300) = ""  # the setting: model, sizes, parameters, seeds
+    source: Text(64, 1)  # "proposal" or a citation key
+    quote: Text(300, 1)  # verbatim from the source
+    verified: bool = False
+
+
 class ResearchBrief(Contract):
     objective: Text(600, 1)
     hypotheses: _short_list(8) = []
@@ -51,6 +69,7 @@ class ResearchBrief(Contract):
     constraints: _short_list(10) = []
     success_metrics: _short_list(10) = []
     open_questions: _short_list(10) = []
+    benchmarks: Annotated[list[Benchmark], Field(max_length=30)] = []  # D93
     paper_cards: list[BlobRef] = []
 
 
@@ -59,6 +78,9 @@ class Milestone(Part):
     title: Text(200, 1)
     acceptance_criteria: Annotated[list[Criterion], Field(min_length=1, max_length=12)]
     depends_on: list[MilestoneId] = []
+    # D93: refs into the reference data this milestone reproduces (`benchmarks.BM3`, or a path or
+    # prefix in the owner's recorded values); the owner runs the check
+    benchmarks: Annotated[list[BenchmarkRef], Field(max_length=20)] = []
     status: Literal["pending", "in_progress", "done", "failed", "skipped"] = "pending"
 
 

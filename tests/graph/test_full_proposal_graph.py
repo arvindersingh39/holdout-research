@@ -33,7 +33,7 @@ def _run(tmp_path: Path, fake: FakeLLM, cap: int | None = None):
         drive(
             graph,
             deps.run_id,
-            FakeChannel(decide("approve"), decide("approve"), decide("stop")),
+            FakeChannel(decide("approve"), decide("stop")),
             start=True,
         )
 

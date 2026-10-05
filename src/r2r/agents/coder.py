@@ -1,8 +1,9 @@
-"""#5 Coder: implements the MathSpec through tools until the frozen tests pass (Phase 5).
+"""#5 Coder: implements the MathSpec's stubs through tools until the stub check passes (D93).
 
-The coder can read anything in the workspace but write only under src/ and bench/. Attempts to
-write tests or checks are refused, logged and counted; the harness verifies the frozen hash
-before every test run regardless.
+The coder can read anything in the workspace but write only under src/, bench/ and figures/.
+The stub check (plain Python) is its finish line: every stub implemented with its signature, the
+package importable, and a reproduce script when the milestone has benchmarks. The benchmark values
+themselves never reach the coder.
 """
 
 from __future__ import annotations
@@ -13,10 +14,9 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from r2r.contracts import MathSpec, MilestoneSpec, TestResult
-from r2r.harness.frozen import FrozenTamper
 from r2r.harness.sandbox import SandboxBackend
-from r2r.harness.tests import run_tests
-from r2r.harness.workspace import FROZEN_DIRS, UnsafePath, Workspace, safe_path
+from r2r.harness.stubcheck import Stub, check_code
+from r2r.harness.workspace import UnsafePath, Workspace, safe_path
 from r2r.llm.gateway import CallContext, run_tool_loop
 from r2r.llm.tools import Tool, ToolLoopResult, ToolLoopState
 from r2r.log import get_logger
@@ -24,7 +24,11 @@ from r2r.log import get_logger
 log = get_logger("r2r.agents.coder")
 
 ROLE = "coder"
-WRITE_DIRS = ("src", "bench")
+WRITE_DIRS = ("src", "bench", "figures")
+NUDGE = (
+    "Continue with the tools: write the code with create_file/edit_file, then call check_code. "
+    "The session ends when check_code passes."
+)
 READ_LINES = 400
 CREATE_LINES = 600
 _HIDDEN = {".r2r", "__pycache__", ".pytest_cache"}
@@ -60,19 +64,6 @@ class NoArgs(BaseModel):
     pass
 
 
-class DisputeArgs(BaseModel):
-    test_id: str
-    reason: str
-    evidence: str = ""
-
-
-@dataclass(frozen=True)
-class Dispute:
-    test_id: str
-    reason: str
-    evidence: str
-
-
 @dataclass
 class CoderTools:
     ws: Workspace
@@ -80,9 +71,10 @@ class CoderTools:
     run_id: str
     milestone_id: str
     timeout_s: float
-    tamper_attempts: list[str] = field(default_factory=list)
+    stubs: list[Stub] = field(default_factory=list)
+    reproduce: str | None = None  # the reproduce script a benchmark milestone needs
+    blocked_writes: list[str] = field(default_factory=list)
     last_result: TestResult | None = None
-    disputes: list[Dispute] = field(default_factory=list)
 
     def tools(self) -> list[Tool]:
         return [
@@ -123,19 +115,12 @@ class CoderTools:
                 max_output_chars=500,
             ),
             Tool(
-                "run_tests",
-                "Run the frozen tests and return the TestResult as JSON.",
+                "check_code",
+                "Run the stub check: every stub implemented with its signature, the package "
+                "importable, and the reproduce script present when needed. Returns a TestResult.",
                 NoArgs,
-                self.run_tests,
+                self.check_code,
                 max_output_chars=6000,
-            ),
-            Tool(
-                "dispute_test",
-                "Flag a frozen test you believe can never pass for correct code. Give the test id, "
-                "your reason and concrete evidence. Ends the session; a human decides.",
-                DisputeArgs,
-                self.dispute_test,
-                max_output_chars=300,
             ),
         ]
 
@@ -173,14 +158,8 @@ class CoderTools:
         try:
             return safe_path(self.ws.root, rel, WRITE_DIRS)
         except UnsafePath:
-            norm = Path(rel).as_posix().lstrip("./")
-            if any(norm == d or norm.startswith(f"{d}/") for d in FROZEN_DIRS):
-                self.tamper_attempts.append(rel)
-                log.warning("tamper attempt blocked", extra={"path": rel})
-                raise PermissionError(
-                    f"{rel}: tests/frozen/ and checks/ are read-only. "
-                    "Change the code, not the tests."
-                ) from None
+            self.blocked_writes.append(rel)
+            log.warning("write outside the code folders refused", extra={"path": rel})
             raise
 
     def edit_file(self, args: EditArgs) -> str:
@@ -214,35 +193,31 @@ class CoderTools:
         total = len(path.read_text().splitlines())
         return f"appended {n} lines to {args.path} ({total} lines now)"
 
-    # --- test --------------------------------------------------------------------------------
+    # --- check -------------------------------------------------------------------------------
 
-    def dispute_test(self, args: DisputeArgs) -> str:
-        self.disputes.append(Dispute(args.test_id[:200], args.reason[:1000], args.evidence[:1500]))
-        log.warning("test disputed", extra={"test_id": args.test_id[:200]})
-        return "Dispute recorded. The session ends here and the human decides."
-
-    def run_tests(self, _: NoArgs) -> str:
-        try:
-            result = run_tests(
-                self.ws,
-                self.sandbox,
-                run_id=self.run_id,
-                milestone_id=self.milestone_id,
-                timeout_s=self.timeout_s,
-            )
-        except FrozenTamper as e:
-            self.tamper_attempts.append(str(e))
-            raise
+    def check_code(self, _: NoArgs) -> str:
+        result = check_code(
+            self.ws,
+            self.sandbox,
+            self.stubs,
+            self.reproduce,
+            timeout_s=self.timeout_s,
+            run_id=self.run_id,
+            milestone_id=self.milestone_id,
+        )
         self.last_result = result
-        return result.model_dump_json(exclude={"created_by", "run_id", "milestone_id"})
+        return result.model_dump_json(exclude={"created_by", "run_id", "milestone_id", "frozen_ok"})
 
 
 class CoderInput(BaseModel):
     spec: MilestoneSpec
     math_spec: MathSpec
-    last_test_result: TestResult | None = None
+    last_check: TestResult | None = None
     files: str
-    verification: str | None = None  # values the verifier found wrong (Phase 7d): fix the code
+    benchmarks: list[dict[str, str]] = []  # refs to report, with descriptions; never values
+    reproduce_script: str | None = None  # write it when there are benchmarks
+    results_file: str | None = None  # where the reproduce script writes its entries
+    mismatches: str | None = None  # the owner's run disagreed with the reference: fix the code
 
 
 @dataclass(frozen=True)
@@ -258,19 +233,25 @@ def run_coder_session(
     tools: CoderTools,
     ctx: CallContext,
     model: str | None = None,
-    verification: str | None = None,
+    benchmarks: list[dict[str, str]] | None = None,
+    results_file: str | None = None,
+    mismatches: str | None = None,
 ) -> CoderSession:
     def stop(_: ToolLoopState) -> bool:
-        passed = tools.last_result is not None and tools.last_result.passed
-        return passed or bool(tools.disputes)
+        return tools.last_result is not None and tools.last_result.passed
 
     payload = CoderInput(
         spec=spec,
         math_spec=math_spec,
-        last_test_result=last,
+        last_check=last,
         files=tools.list_files(ListArgs()),
-        verification=verification,
+        benchmarks=benchmarks or [],
+        reproduce_script=tools.reproduce,
+        results_file=results_file if tools.reproduce else None,
+        mismatches=mismatches,
     )
     max_turns = ctx.settings.budgets.coder_max_turns
-    loop = run_tool_loop(ROLE, ROLE, payload, tools.tools(), max_turns, stop, ctx, model=model)
+    loop = run_tool_loop(
+        ROLE, ROLE, payload, tools.tools(), max_turns, stop, ctx, model=model, nudge=NUDGE
+    )
     return CoderSession(loop=loop, tools=tools)

@@ -278,8 +278,8 @@ def test_tool_loop_no_cache_point_for_other_providers(ctx: CallContext, fake: Fa
         pass
 
     tools = [Tool(name="ping", description="ping", input_model=NoArgs, handler=lambda _: "pong")]
-    fake.script("optimizer", [tool_call("ping")], "done")
-    run_tool_loop("optimizer", "optimizer", milestone_spec(), tools, 5, lambda s: False, ctx)
+    fake.script("digest", [tool_call("ping")], "done")
+    run_tool_loop("digest", "digest", milestone_spec(), tools, 5, lambda s: False, ctx)
     assert all(
         isinstance(m["content"], str) or m["role"] == "system" or m["content"] is None
         for m in fake.calls[1].messages
@@ -292,17 +292,17 @@ def test_tool_loop_no_cache_point_for_other_providers(ctx: CallContext, fake: Fa
 def test_openrouter_reasoning_budget_format(ctx: CallContext, fake: FakeLLM) -> None:
     """Through OpenRouter, Anthropic-style `thinking` is ignored for Gemini (probe 2026-10-01);
     the budget must go in OpenRouter's own `reasoning.max_tokens`."""
-    from samples import optimization_patch, profile_report
+    from samples import math_design, milestone_spec
 
-    from r2r.contracts import OptimizationPatch
+    from r2r.contracts import MathDesign
 
-    fake.script("optimizer", optimization_patch())
-    call_structured("optimizer", "optimizer", profile_report(), OptimizationPatch, ctx)
+    fake.script("math_designer", math_design())
+    call_structured("math_designer", "math_designer", milestone_spec(), MathDesign, ctx)
     req = fake.calls[0]
     assert req.model.startswith("openrouter/")
     assert req.thinking is None
-    assert req.extra == {"extra_body": {"reasoning": {"max_tokens": 2000}}}
-    assert req.max_tokens == 4000 + 2000  # thinking never crowds out the answer
+    assert req.extra == {"extra_body": {"reasoning": {"max_tokens": 4000}}}
+    assert req.max_tokens == 16000 + 4000  # thinking never crowds out the answer
 
 
 def test_anthropic_reasoning_budget_unchanged(ctx: CallContext, fake: FakeLLM) -> None:

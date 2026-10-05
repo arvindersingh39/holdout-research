@@ -15,6 +15,7 @@ from r2r.contracts.math import BenchSpec, ContractCheck, MathDesign, MathSpec, S
 from r2r.contracts.oversight import Briefing, OversightFlag, OversightReport
 from r2r.contracts.planning import (
     BaselineCard,
+    Benchmark,
     Citation,
     CoordinatorVerdict,
     Milestone,
@@ -36,6 +37,7 @@ from r2r.contracts.verification import Mismatch, VerificationReport
 __all__ = [
     "BaselineCard",
     "BenchSpec",
+    "Benchmark",
     "BlobKind",
     "BlobRef",
     "Briefing",

@@ -41,9 +41,9 @@ def collect_evidence(
     point: OversightPoint,
     files: Mapping[str, str] | None = None,
     max_chars: int = 3000,
-    data: Mapping[str, str] | None = None,
 ) -> list[Evidence]:
-    """What the overseer may cite at this hook point, from state contracts only."""
+    """What the overseer may cite at this hook point, from state contracts only. Never the
+    reference values before the result: its briefings reach the designer and coder (D93)."""
     items: list[tuple[str, str]] = []
     rm, spec = state.get("roadmap"), state.get("spec")
     if point == "plan" and rm is not None:
@@ -51,6 +51,8 @@ def collect_evidence(
             items += [
                 ("criterion", f"{m.id}.{c.id} ({m.title}): {c.text}") for c in m.acceptance_criteria
             ]
+            if m.benchmarks:
+                items.append(("benchmarks", f"{m.id} reproduces: {', '.join(m.benchmarks)}"))
     elif spec is not None:
         items += [
             ("criterion", f"{spec.milestone_id}.{c.id}: {c.text}") for c in spec.acceptance_criteria
@@ -66,7 +68,7 @@ def collect_evidence(
             for c in m.acceptance_criteria
         ]
     ms = state.get("math_spec")
-    if point in ("design", "design_gate", "tests", "code") and ms is not None:
+    if point in ("design", "code") and ms is not None:
         items.append(
             (
                 "math_spec",
@@ -75,30 +77,31 @@ def collect_evidence(
                 ),
             )
         )
-    if point in ("design", "design_gate", "tests"):
-        if state.get("design_feedback"):
-            items.append(("design_rejection", state["design_feedback"]))
-        items += [("perf_not_met_by_reference", t) for t in state.get("perf_unmet", [])]
-        items += [("test_file", f"# {p}\n{src}") for p, src in (files or {}).items()]
     if point == "code":
         res = state.get("test_result")
         if res is not None:
-            items += [("test_failure", f"{f.test_id}: {f.message}\n{f.tail}") for f in res.failures]
+            items += [
+                ("check_failure", f"{f.test_id}: {f.message}\n{f.tail}") for f in res.failures
+            ]
         if state.get("coder_message"):
             items.append(("coder_last_message", state["coder_message"]))
-        items += [("test_file", f"# {p}\n{src}") for p, src in (files or {}).items()]
+    if point in ("design", "code"):
+        items += [("code_file", f"# {p}\n{src}") for p, src in (files or {}).items()]
     if point == "result" and state.get("digest") is not None:
         d = state["digest"]
-        totals = (
-            "Note: tests_passed/tests_failed count the whole frozen suite, including earlier "
-            "milestones' tests; per-criterion counts cover this milestone only.\n"
+        items.append(
+            ("digest", d.model_dump_json(include={"status", "criteria", "metrics", "deviations"}))
         )
-        digest = d.model_dump_json(include={"status", "criteria", "metrics", "deviations"})
-        items.append(("digest", totals + digest))
-        if state.get("opt_stop_reason"):
-            items.append(("optimizer", state["opt_stop_reason"]))
-    if point in ("spec", "design", "design_gate", "tests", "code"):  # owner's recorded values
-        items += [("reference_data", f"# {p}\n{text}") for p, text in (data or {}).items()]
+        ver = state.get("verification")
+        if ver is not None:
+            items.append(
+                (
+                    "benchmark_comparison",
+                    ver.model_dump_json(
+                        include={"status", "n_checked", "n_within", "mismatches", "log_tail"}
+                    ),
+                )
+            )
     if state.get("human_note"):
         items.append(("owner_note", state["human_note"]))
     return [Evidence(id=f"E{i}", kind=k, text=t[:max_chars]) for i, (k, t) in enumerate(items, 1)]

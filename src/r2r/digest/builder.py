@@ -1,17 +1,20 @@
-"""Templates test results and ledger data into a ResultDigest (D33: minimal, deterministic).
-
-Phase 7 adds bench numbers, optimizer outcomes and the LLM-written deviations note.
-"""
+"""Templates the code check, the benchmark comparison and ledger data into a ResultDigest
+(D33: minimal, deterministic; D93: no tests, so criteria are the owner's to judge unless the
+milestone's benchmarks were reproduced)."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 from pydantic import BaseModel
 
-from r2r.contracts import CriterionResult, Failure, MilestoneSpec, ResultDigest, TestResult
+from r2r.contracts import (
+    CriterionResult,
+    Failure,
+    MilestoneSpec,
+    ResultDigest,
+    TestResult,
+    VerificationReport,
+)
 from r2r.contracts.base import Text
-from r2r.harness.tests import CaseOutcome
 from r2r.llm.gateway import CallContext, call_structured
 from r2r.store.ledger import Ledger
 
@@ -20,54 +23,40 @@ DEVIATIONS_CHARS = 500
 
 def build_digest(
     spec: MilestoneSpec,
-    cases: Sequence[CaseOutcome],
+    check: TestResult,
+    verification: VerificationReport | None,
     ledger: Ledger,
     *,
     run_id: str,
     milestone_id: str,
-    test_files: Sequence[str] | None,
-    runtime_baseline_s: float | None = None,
-    runtime_final_s: float | None = None,
-    optimizer_attempts: int = 0,
-    optimizer_stop: str | None = None,
-    unchecked: dict[str, str] | None = None,
 ) -> ResultDigest:
-    mine = [c for c in cases if test_files is None or c.file in test_files]
-    unchecked = unchecked or {}
-    criteria = []
-    for crit in spec.acceptance_criteria:
-        if crit.id in unchecked:  # D87: no numerical output; not a failure, the owner's call
-            why = f"not checked, owner judges: {unchecked[crit.id]}"[:120]
-            criteria.append(CriterionResult(id=crit.id, passed=False, evidence=why, checked=False))
-            continue
-        own = [c for c in mine if c.criterion_id == crit.id and c.outcome != "skipped"]
-        ok = sum(c.outcome == "passed" for c in own)
-        passed = bool(own) and ok == len(own)
-        evidence = f"{ok}/{len(own)} tests pass" if own else "no tests for this criterion"
-        criteria.append(CriterionResult(id=crit.id, passed=passed, evidence=evidence))
-    n_pass = sum(c.outcome == "passed" for c in cases)
-    n_fail = sum(c.outcome in ("failed", "error") for c in cases)
-    checked = [c for c in criteria if c.checked]
-    n_ok = sum(c.passed for c in checked)
-    if n_ok == len(checked) and n_fail == 0:
-        status = "met"
-    elif n_ok == 0:
-        status = "failed"
+    ver = verification.status if verification is not None else "none"
+    if not check.passed:
+        evidence = f"code incomplete: {check.n_failed} stub check failure(s)"
+    elif ver == "none":
+        evidence = "implemented; no benchmark: you judge"
     else:
+        evidence = f"implemented; benchmarks {ver}"
+    criteria = [
+        CriterionResult(id=c.id, passed=check.passed, evidence=evidence[:120], checked=False)
+        for c in spec.acceptance_criteria
+    ]
+    if not check.passed:
+        status = "failed" if check.n_passed == 0 else "partial"
+        deviations = f"The code check still fails ({check.n_failed} item(s))."
+    elif ver in ("mismatch", "error"):
         status = "partial"
-    failed_ids = [c.id for c in checked if not c.passed]
-    deviations = ""
-    if failed_ids:
-        deviations = f"Criteria not met: {', '.join(failed_ids)}."
-    if n_fail and not failed_ids:
-        deviations = f"{n_fail} test(s) outside this milestone's criteria are failing."
-    metrics = {"tests_passed": float(n_pass), "tests_failed": float(n_fail)}
-    if runtime_baseline_s is not None:
-        metrics["runtime_baseline_s"] = runtime_baseline_s
-        metrics["runtime_final_s"] = runtime_final_s or runtime_baseline_s
-        metrics["optimizer_attempts"] = float(optimizer_attempts)
-    if optimizer_stop:
-        deviations = f"{deviations} Optimizer stopped: {optimizer_stop}.".strip()
+        deviations = f"Benchmarks {ver}."
+    else:
+        status = "met"
+        deviations = ""
+    metrics = {"check_passed": float(check.n_passed), "check_failed": float(check.n_failed)}
+    if verification is not None:
+        metrics |= {
+            "benchmarks_checked": float(verification.n_checked),
+            "benchmarks_within": float(verification.n_within),
+            "benchmarks_mismatched": float(verification.n_mismatched),
+        }
     rows = [r for r in ledger.rows(run_id) if r.milestone_id == milestone_id]
     return ResultDigest(
         created_by="digest",

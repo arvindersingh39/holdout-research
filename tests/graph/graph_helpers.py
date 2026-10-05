@@ -8,14 +8,12 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "unit"))
 from samples import coordinator_verdict, milestone_spec, research_brief, roadmap
 
 from r2r.contracts import (
-    BenchSpec,
     CoordinatorVerdict,
     FileSpec,
     HumanDecision,
     Issue,
     MathDesign,
     MathSpec,
-    SanityCheck,
 )
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest
@@ -128,113 +126,45 @@ def make_deps(
 
 STUB = "def square(x: float) -> float:\n    raise NotImplementedError\n"
 IMPL = "def square(x: float) -> float:\n    return x * x\n"
-# D87: sanity checks are the only tests: an oracle from the formula next to the package call
-GOOD_TESTS = """\
-from {pkg}.core import square
 
 
-def oracle_square(x):
-    return x * x
-
-
-def test_AC1__square_of_three():
-    assert square(3) == oracle_square(3)
-
-
-def test_AC1__square_of_negative():
-    assert square(-2) == oracle_square(-2)
-"""
-VACUOUS_TESTS = """\
-from {pkg}.core import square
-
-
-def oracle_one():
-    return 1
-
-
-def test_AC1__always_true():
-    assert oracle_one() == 1 or square
-"""
-BROKEN_TESTS = """\
-from no_such_package import square
-
-
-def oracle_square(x):
-    return x * x
-
-
-def test_AC1__x():
-    assert square(3) == oracle_square(3)
-"""
-
-
-def design(
-    n: int,
-    tests: str = GOOD_TESTS,
-    bench: bool = False,
-    reference: str = IMPL,
-    extra: tuple[FileSpec, ...] = (),
-    sanity: bool = True,
-) -> MathDesign:
-    """`bench=False` (default) skips the simplifier for that milestone. `sanity=False` leaves
-    AC1 without a sanity check (and without tests), which the harness rejects (D87)."""
+def design(n: int, extra: tuple[FileSpec, ...] = ()) -> MathDesign:
+    """D93: the formulation and stubs only."""
     pkg = f"sq{n}"
     meta = {"created_by": "math_designer", "run_id": "g", "milestone_id": f"M{n}"}
-    test_file = sanity_file(n)
     spec = MathSpec(
         **meta,
         formulation="f(x) = x^2",
         algorithm="multiply",
         signatures=["square(x: float) -> float"],
-        test_files=[test_file] if sanity else [],
-        sanity_checks=[
-            SanityCheck(
-                id="S1",
-                criterion_ids=["AC1"],
-                kind="limit_case",
-                statement="square agrees with x*x written from the formula",
-                file=test_file,
-            )
-        ]
-        if sanity
-        else [],
-        bench=BenchSpec(entrypoint=f"bench/bench_m{n}.py", problem_size="2000 calls")
-        if bench
-        else None,
     )
     files = [
-        *(
-            [FileSpec(path=test_file, purpose="test", content=tests.format(pkg=pkg))]
-            if sanity
-            else []
-        ),
         FileSpec(path=f"src/{pkg}/__init__.py", purpose="stub", content=""),
         FileSpec(path=f"src/{pkg}/core.py", purpose="stub", content=STUB),
-        FileSpec(path=f"src/{pkg}/core.py", purpose="reference", content=reference),
         *extra,
     ]
-    if bench:
-        body = "def main():\n    for _ in range(2000):\n        square(2.0)\n"
-        files.append(
-            FileSpec(
-                path=f"bench/bench_m{n}.py",
-                purpose="bench",
-                content=f"from {pkg}.core import square\n\n\n{body}",
-            )
-        )
     return MathDesign(**meta, spec=spec, files=files)
 
 
-def sanity_file(n: int) -> str:
-    return f"tests/frozen/sanity/test_sanity_m{n}.py"
-
-
 def coder_pass(n: int) -> list[list[ToolCall]]:
-    """One coder session that implements square(x) and runs the tests."""
+    """One coder session that implements square(x) and runs the stub check."""
     return [
         [tool_call("create_file", path=f"src/sq{n}/core.py", content=IMPL)],
-        [tool_call("run_tests")],
+        [tool_call("check_code")],
     ]
+
+
+def reproduce(n: int, values: dict[str, float]) -> list[list[ToolCall]]:
+    """The coder writes the milestone's reproduce script (D93) reporting `values`."""
+    entries = [{"ref": r, "generated": v} for r, v in values.items()]
+    body = (
+        "import json, pathlib\n\n\ndef main():\n"
+        f"    out = pathlib.Path('results/benchmarks/m{n}.json')\n"
+        "    out.parent.mkdir(parents=True, exist_ok=True)\n"
+        f"    out.write_text(json.dumps({{'entries': {entries!r}}}))\n\n\n"
+        "if __name__ == '__main__':\n    main()\n"
+    )
+    return [[tool_call("create_file", path=f"bench/reproduce_m{n}.py", content=body)]]
 
 
 def script_milestone(fake: FakeLLM, n: int, verdict: CoordinatorVerdict = PASS) -> None:

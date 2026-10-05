@@ -8,13 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from r2r.harness.bench import run_bench
-from r2r.harness.checks import run_checks
-from r2r.harness.frozen import freeze
-from r2r.harness.gitops import sloc
-from r2r.harness.profile import run_profile
 from r2r.harness.sandbox import DockerBackend, ensure_image
-from r2r.harness.tests import run_tests
+from r2r.harness.stubcheck import check_code, record_stubs
 from r2r.harness.workspace import Workspace
 from r2r.settings import SandboxLimits, load_settings
 from r2r.store.runs import run_paths
@@ -126,18 +121,24 @@ def test_scientific_stack(ws: Workspace, box: DockerBackend) -> None:
     assert res.stdout.startswith("ok")
 
 
-def test_full_pipeline_in_container(ws: Workspace, box: DockerBackend) -> None:
-    checks = run_checks(ws, box, timeout_s=60)
-    assert [c.passed for c in checks] == [True]
-    freeze(ws)
-    res = run_tests(ws, box, timeout_s=LIMITS.test_timeout_s, **META)
-    assert (res.n_passed, res.n_failed, res.frozen_ok) == (6, 1, True)
-    assert res.failures[0].criterion_id == "AC2"
-    bench = run_bench(ws, box, "bench/bench_main.py", repeats=3, timeout_s=120)
-    assert 0 < bench.median_s < 5
-    prof = run_profile(ws, box, "bench/bench_main.py", timeout_s=120, **META)
-    assert "slow_sum" in {h.qualname for h in prof.hotspots}
-    assert sloc(box) > 5
+def test_stub_check_in_container(ws: Workspace, box: DockerBackend) -> None:
+    """D93: the coder's finish line runs its import check in the sandbox."""
+    (ws.root / "src/sq").mkdir()
+    (ws.root / "src/sq/__init__.py").write_text("")
+    stub = "def square(x: float) -> float:\n    raise NotImplementedError\n"
+    (ws.root / "src/sq/core.py").write_text(stub)
+    stubs = record_stubs(ws.root, ["src/sq/__init__.py", "src/sq/core.py"])
+    first = check_code(ws, box, stubs, None, timeout_s=60, **META)
+    assert not first.passed and "not implemented" in first.failures[0].message
+    (ws.root / "src/sq/core.py").write_text(
+        "import numpy as np\n\n\ndef square(x: float) -> float:\n    return float(np.square(x))\n"
+    )
+    assert check_code(ws, box, stubs, None, timeout_s=60, **META).passed
+    (ws.root / "src/sq/core.py").write_text(
+        "import requests_nowhere\n\n\ndef square(x):\n    return x\n"
+    )
+    bad = check_code(ws, box, stubs, None, timeout_s=60, **META)
+    assert not bad.passed and any("import sq.core fails" in f.message for f in bad.failures)
 
 
 def test_matplotlib_headless_png(ws: Workspace, box: DockerBackend) -> None:
@@ -171,49 +172,3 @@ def test_cli_sandbox_check(image: str) -> None:
     result = CliRunner().invoke(cli.app, ["sandbox", "check"])
     assert result.exit_code == 0, result.output
     assert result.output.count("✓") == 4 and "OK" in result.output
-
-
-def test_contract_checks_run_in_the_sandbox(ws: Workspace, box: DockerBackend) -> None:
-    """D88: generated contract checks (temp files in /tmp, json) work with a read-only root."""
-    from r2r.contracts import ContractCheck
-    from r2r.harness.contract_checks import write_contract_tests
-
-    (ws.root / "src/cpkg").mkdir()
-    (ws.root / "src/cpkg/__init__.py").write_text("")
-    (ws.root / "src/cpkg/io.py").write_text(
-        "import json\n\ndef save(out: str, n: int = 2):\n"
-        "    if n < 0:\n        raise ValueError('n')\n"
-        "    open(out, 'w').write(json.dumps({'n': n}))\n"
-    )
-    base = {"criterion_ids": ["AC9"], "call": "cpkg.io.save"}
-    checks = [
-        ContractCheck(id="C1", kind="interface", params=["out", "n"], **base),
-        ContractCheck(
-            id="C2",
-            kind="raises",
-            args={"out": "{tmp}/x.json", "n": -1},
-            raises="ValueError",
-            **base,
-        ),
-        ContractCheck(
-            id="C3",
-            kind="output",
-            args={"out": "{tmp}/x.json"},
-            file="{tmp}/x.json",
-            format="json",
-            keys=["n"],
-            **base,
-        ),
-    ]
-    write_contract_tests(ws.root, "M9", checks)
-    from r2r.harness.tests import run_tests_detailed
-
-    _, cases = run_tests_detailed(
-        ws, box, timeout_s=LIMITS.test_timeout_s, require_frozen=False, **META
-    )
-    mine = {c.name: c.outcome for c in cases if "contract" in c.file}
-    assert mine == {
-        "test_AC9__C1_interface": "passed",
-        "test_AC9__C2_raises": "passed",
-        "test_AC9__C3_output": "passed",
-    }

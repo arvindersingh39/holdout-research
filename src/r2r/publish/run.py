@@ -86,8 +86,8 @@ def run_publish(
         if check:
             verdict = "pass" if check.passed else "FAIL"
             md.append(
-                f"- Frozen tests on the installed wheel, clean sandbox: {verdict} "
-                f"({check.n_passed} passed, {check.n_failed} failed)"
+                f"- Installed wheel in a clean sandbox imports: {verdict} "
+                f"({check.n_passed} modules imported, {check.n_failed} failed)"
             )
     return bundles, "\n".join(md)
 

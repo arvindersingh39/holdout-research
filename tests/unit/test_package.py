@@ -42,7 +42,7 @@ def ws(tmp_path: Path) -> Workspace:
     (ws.root / "src/ising").mkdir(parents=True)
     (ws.root / "src/ising/__init__.py").write_text("")
     (ws.root / "src/ising/core.py").write_text(CORE)
-    (ws.root / "tests/frozen/test_m1.py").write_text("def test_AC1__x():\n    assert True\n")
+    (ws.root / "bench/reproduce_m1.py").write_text("print('reproduce')\n")
     return ws
 
 
@@ -74,11 +74,11 @@ def test_assemble_package(ws: Workspace, tmp_path: Path) -> None:
     assert any(d.startswith("numpy") for d in deps) and any(d.startswith("scipy") for d in deps)
     assert not any(d.startswith("os") for d in deps)  # stdlib is not a dependency
     assert meta["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/ising"]
-    assert (pkg / "src/ising/core.py").is_file() and (pkg / "tests/frozen/test_m1.py").is_file()
+    assert (pkg / "src/ising/core.py").is_file() and (pkg / "bench/reproduce_m1.py").is_file()
     readme = (pkg / "README.md").read_text()
-    assert "2D Ising Monte Carlo" in readme and "| M1 |" in readme and "frozen tests" in readme
+    assert "2D Ising Monte Carlo" in readme and "| M1 |" in readme and "reproduce" in readme
     assert "energy(" in (pkg / "API.md").read_text()
-    assert "pytest -q tests/frozen" in (pkg / ".github/workflows/tests.yml").read_text()
+    assert "import ising" in (pkg / ".github/workflows/tests.yml").read_text()
 
 
 def test_build_wheel_command(tmp_path: Path) -> None:

@@ -141,9 +141,45 @@ def test_human_edit_needs_replacement() -> None:
 def test_math_design_files_cover_spec() -> None:
     assert math_design().spec == math_spec()
     data = math_design().model_dump()
-    data["files"] = []
-    with pytest.raises(ValidationError, match=re.escape("tests/frozen/sanity/test_sanity_bs.py")):
+    data["files"] = [f for f in data["files"] if f["path"] != "bench/run.py"]
+    with pytest.raises(ValidationError, match=re.escape("bench/run.py")):
         MathDesign.model_validate(data)
+
+
+def test_math_design_writes_stubs_only() -> None:
+    """D93: no tests, checks, verify scripts or data from the designer."""
+    for path in ("tests/frozen/sanity/test_sanity_x.py", "checks/c.py", "tests/frozen/data/x.json"):
+        data = math_design().model_dump()
+        data["files"].append({"path": path, "purpose": "stub", "content": "x"})
+        with pytest.raises(ValidationError, match="stubs only"):
+            MathDesign.model_validate(data)
+
+
+def test_math_spec_schema_hides_the_retired_check_fields() -> None:
+    """D93: the model never sees sanity or contract checks; older runs' specs still load."""
+    from r2r.contracts import MathSpec
+
+    props = MathSpec.model_json_schema()["properties"]
+    for old in ("test_files", "sanity_checks", "contract_checks", "unchecked_criteria"):
+        assert old not in props
+    legacy = {**math_spec().model_dump(), "test_files": ["tests/frozen/sanity/test_sanity_a.py"]}
+    legacy["unchecked_criteria"] = {"AC2": "a file"}
+    assert MathSpec.model_validate(legacy).unchecked_criteria == {"AC2": "a file"}
+
+
+def test_milestone_benchmarks_and_brief_benchmarks() -> None:
+    from r2r.contracts import Benchmark, Milestone
+
+    m = Milestone.model_validate(
+        {**roadmap().milestones[0].model_dump(), "benchmarks": ["benchmarks.BM1", "graph0.B1[2]"]}
+    )
+    assert m.benchmarks == ["benchmarks.BM1", "graph0.B1[2]"]
+    with pytest.raises(ValidationError):
+        Milestone.model_validate({**m.model_dump(), "benchmarks": ["no spaces allowed"]})
+    b = Benchmark(id="BM1", quantity="q", value=0.4, tolerance=0.05, source="proposal", quote="0.4")
+    assert not b.verified  # set by code only
+    with pytest.raises(ValidationError):
+        Benchmark.model_validate({**b.model_dump(), "id": "X1"})
 
 
 def test_file_spec_paths_stay_inside_workspace() -> None:

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from r2r.agents.coder import AppendArgs, CoderTools, CreateArgs
 from r2r.harness.sandbox import LocalProcessBackend
-from r2r.harness.workspace import Workspace
+from r2r.harness.workspace import UnsafePath, Workspace
 from r2r.llm.client import LLMResponse
 from r2r.llm.fake import FakeLLM, tool_call
 from r2r.llm.gateway import CallContext, run_tool_loop
@@ -84,8 +84,8 @@ def test_append_file_writes_big_files_in_parts(tools: CoderTools) -> None:
     root = tools.ws.root
     assert (root / "src/pkg/big.py").read_text() == "a = 1\nb = 2\n"
     assert (root / "src/pkg/new.py").read_text() == "c = 3\n"
-    with pytest.raises(PermissionError):
-        tools.append_file(AppendArgs(path="tests/frozen/test_x.py", content="x"))
+    with pytest.raises(UnsafePath):  # only code folders are writable
+        tools.append_file(AppendArgs(path="tests/test_x.py", content="x"))
     assert "append_file" in {t.name for t in tools.tools()}
 
 

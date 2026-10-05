@@ -1,7 +1,7 @@
 """The planning graph end to end with FakeLLM: routing, gates, stop and resume.
 
-Milestones now run the real design → freeze → code → digest steps (Phase 5) in the
-unit-test sandbox (LocalProcessBackend).
+Milestones run the real design → code → digest steps (D93) in the unit-test sandbox
+(LocalProcessBackend).
 """
 
 import subprocess
@@ -46,10 +46,9 @@ def test_full_pass_path_to_completion(tmp_path: Path, fake: FakeLLM) -> None:
     fake.script("long_planner", ROADMAP)  # met results need no replan (leak 3)
     script_milestone(fake, 1)
     script_milestone(fake, 2)
-    ch = FakeChannel(*[decide("approve")] * 4)
+    ch = FakeChannel(*[decide("approve")] * 3)
     _, res = _run(tmp_path, fake, ch)
-    # One roadmap gate (later rewrites aren't material); tests reviewed on the first milestone only.
-    assert ch.gates == ["roadmap", "tests", "result", "result"]
+    assert ch.gates == ["roadmap", "result", "result"]  # later rewrites aren't material
     assert res.status == "complete"
     rm: Roadmap = res.state["roadmap"]
     assert [m.status for m in rm.milestones] == ["done", "done"]
@@ -62,7 +61,7 @@ def test_specs_get_context_refs_and_milestone_ids(tmp_path: Path, fake: FakeLLM)
     fake.script("long_planner", ROADMAP, ROADMAP)
     script_milestone(fake, 1)
     script_milestone(fake, 2)
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("approve"), decide("stop"))
+    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
     _, res = _run(tmp_path, fake, ch)
     spec = res.state["spec"]
     assert spec.milestone_id == "M2"
@@ -75,32 +74,24 @@ def test_revise_once_then_pass(tmp_path: Path, fake: FakeLLM) -> None:
     fake.script("short_planner", SPEC)
     fake.script("coordinator", REVISE)
     script_milestone(fake, 1)
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+    ch = FakeChannel(decide("approve"), decide("stop"))
     _, res = _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "result"]
+    assert ch.gates == ["roadmap", "result"]
     assert "Units missing for sigma." in _payloads(fake, "short_planner")[1]
     assert res.status == "stopped"
 
 
-def test_revise_limit_reaches_escalation_gate(tmp_path: Path, fake: FakeLLM) -> None:
+def test_revise_limit_builds_anyway_with_the_open_issues(tmp_path: Path, fake: FakeLLM) -> None:
+    """D93: no escalation gate; after the revise rounds the designer gets the open issues."""
     fake.script("long_planner", ROADMAP)
     fake.script("short_planner", SPEC, SPEC, SPEC)
-    fake.script("coordinator", REVISE, REVISE, REVISE)  # 2 revision rounds allowed, then escalate
-    ch = FakeChannel(decide("approve"), decide("stop"))
-    _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "escalation"]
-    assert "REVISE" in ch.requests[-1].markdown
-
-
-def test_escalation_approve_builds_anyway(tmp_path: Path, fake: FakeLLM) -> None:
-    fake.script("long_planner", ROADMAP)
-    fake.script("short_planner", SPEC, SPEC, SPEC)
-    fake.script("coordinator", REVISE, REVISE, REVISE)
+    fake.script("coordinator", REVISE, REVISE, REVISE)  # 2 revision rounds allowed
     fake.script("math_designer", design(1))
     fake.script("coder", *coder_pass(1))
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("approve"), decide("stop"))
+    ch = FakeChannel(decide("approve"), decide("stop"))
     _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "escalation", "tests", "result"]
+    assert ch.gates == ["roadmap", "result"]
+    assert "Units missing for sigma." in _payloads(fake, "math_designer")[0]
 
 
 def test_roadmap_issue_routes_to_long_planner(tmp_path: Path, fake: FakeLLM) -> None:
@@ -108,9 +99,9 @@ def test_roadmap_issue_routes_to_long_planner(tmp_path: Path, fake: FakeLLM) -> 
     fake.script("short_planner", SPEC)
     fake.script("coordinator", REVISE_ROADMAP)
     script_milestone(fake, 1)
-    ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+    ch = FakeChannel(decide("approve"), decide("stop"))
     _run(tmp_path, fake, ch)
-    assert ch.gates == ["roadmap", "tests", "result"]  # unchanged roadmap: no second roadmap gate
+    assert ch.gates == ["roadmap", "result"]  # unchanged roadmap: no second roadmap gate
     assert "R2: M1 is too big." in _payloads(fake, "long_planner")[1]
 
 
@@ -160,9 +151,9 @@ def test_quit_then_resume_in_fresh_graph(tmp_path: Path, fake: FakeLLM) -> None:
     with open_graph(deps2) as graph:
         assert graph.get_state({"configurable": {"thread_id": "g"}}).next == ("roadmap_gate",)
         assert pending_gate(graph, "g").gate == "roadmap"
-        ch = FakeChannel(decide("approve"), decide("approve"), decide("stop"))
+        ch = FakeChannel(decide("approve"), decide("stop"))
         res2 = drive(graph, "g", ch, start=False)
-    assert ch.gates == ["roadmap", "tests", "result"]
+    assert ch.gates == ["roadmap", "result"]
     assert res2.status == "stopped"
     assert fresh.calls[0].role == "short_planner"  # no re-run of retriever or long planner
 

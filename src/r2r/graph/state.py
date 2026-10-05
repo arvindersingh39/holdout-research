@@ -5,15 +5,11 @@ from __future__ import annotations
 from typing import Literal, TypedDict
 
 from r2r.contracts import (
-    BaselineCard,
     CoordinatorVerdict,
     HumanDecision,
     MathSpec,
     MilestoneSpec,
-    OptimizationOutcome,
-    OptimizationPatch,
     OversightFlag,
-    ProfileReport,
     Proposal,
     PublicationBundle,
     ResearchBrief,
@@ -36,29 +32,18 @@ class PipelineState(TypedDict, total=False):
     verdict: CoordinatorVerdict | None
     revise_rounds: int
     math_spec: MathSpec | None
-    design_attempts: int  # failed designs for the current milestone
-    design_feedback: str | None  # why the last design was rejected (red-green or owner)
-    redgreen_ok: bool
-    frozen_commit: str | None  # workspace commit holding this milestone's frozen tests
-    test_result: TestResult | None
+    stubs: list[dict]  # D93: the designer's stub functions {path, name, params}
+    design_ok: bool
+    design_attempts: int  # unusable designs for the current milestone
+    design_feedback: str | None  # why the last design was unusable
+    test_result: TestResult | None  # the stub check (D93)
     coder_sessions: int
-    tamper: str | None  # FrozenTamper message waiting at the tamper gate
-    tamper_attempts: int  # blocked writes to frozen files, over the whole run
-    baselines: list[BaselineCard]  # quote-verified published values for this milestone (D52)
-    baseline_note: str | None
-    perf_unmet: list[str]  # perf tests the reference misses; the coder must meet them (D60)
-    dispute: str | None  # the coder's dispute of a frozen test, rendered (D56)
-    dispute_file: str | None
     coder_message: str | None  # the coder's final words in its last session
-    opt_outcomes: list[OptimizationOutcome]
-    opt_patches: list[OptimizationPatch | None]  # aligned with opt_outcomes; None = no valid patch
-    opt_baseline_s: float | None
-    opt_runtime_s: float | None  # current best
-    opt_sloc: int
-    opt_bench_hash: str | None
-    opt_profile: ProfileReport | None  # unused since D85; kept for old checkpoints
-    opt_complexity: int | None  # D85: statements + calls under src/
-    opt_stop_reason: str | None
+    benchmark_path: str | None  # the results file the owner named at the benchmark gate
+    benchmark_error: str | None  # why the last results file could not be used
+    verification: VerificationReport | None  # the benchmark comparison (D93)
+    fix_rounds: int  # benchmark mismatches sent back to the coder this milestone
+    verify_retry: bool
     digest: ResultDigest | None
     human_decision: HumanDecision | None
     briefings: dict[str, str]  # role -> the overseer's active briefing (Phase 7c)
@@ -71,9 +56,6 @@ class PipelineState(TypedDict, total=False):
     publication_md: str | None  # what the publication gate shows
     publish_note: str | None  # the owner's revision request
     publish_revisions: int
-    verification: VerificationReport | None  # Phase 7d: what the verifier measured
-    fix_rounds: int  # verification mismatches sent back to the coder this milestone
-    verify_retry: bool
     split_request: bool  # the milestone's spec could not fit: the long planner splits it
     spec_splits: dict[str, int]  # milestone id -> splits already requested (at most one)
     human_note: str | None  # a redirect note waiting for the long-term planner
