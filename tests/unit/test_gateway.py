@@ -429,3 +429,31 @@ def test_grammar_schema_has_no_item_counts_but_the_prompt_and_validation_keep_th
     fake.script("long_planner", json.dumps(too_many), json.dumps(too_many), json.dumps(too_many))
     with pytest.raises(ContractViolation):
         _call(ctx)
+
+
+def test_forced_tool_refusal_falls_back_to_json_text(ctx: CallContext) -> None:
+    """study-3 M9: Sonnet 5.5 with thinking refuses the schema as too complex, then refuses a
+    forced tool call; the schema is in the prompt, so plain JSON text is the last step."""
+    from r2r.llm import gateway
+    from r2r.llm.client import LLMCallError
+
+    fake = FakeLLM(native_schema=True)
+    ctx = CallContext(**{**ctx.__dict__, "client": fake})
+    too_complex = LLMCallError("AnthropicException - Schema is too complex.")
+    no_forced = LLMCallError(
+        "UnsupportedParamsError: claude-sonnet-5-5 does not support forced tool use "
+        "(tool_choice='required' or a named tool)"
+    )
+    model = ctx.settings.models.roles["long_planner"].model
+    gateway._SCHEMA_REJECTED.discard(model)
+    gateway._TEXT_ONLY.discard(model)
+    fake.script("long_planner", too_complex, no_forced, roadmap(), roadmap())
+    assert _call(ctx).goal == roadmap().goal
+    native, tool, text = fake.calls
+    assert native.response_format is not None
+    assert tool.tools is not None and tool.tool_choice
+    assert text.response_format is None and text.tools is None and text.tool_choice is None
+    _call(ctx)  # remembered: straight to text
+    assert fake.calls[3].response_format is None and fake.calls[3].tools is None
+    gateway._SCHEMA_REJECTED.discard(model)
+    gateway._TEXT_ONLY.discard(model)

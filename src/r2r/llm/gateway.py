@@ -97,35 +97,20 @@ def call_structured[C: BaseModel](
         _user_message(payload),
     ]
 
-    native = ctx.client.supports_response_schema(model) and model not in _SCHEMA_REJECTED
+    if model in _TEXT_ONLY:
+        mode = "text"
+    elif ctx.client.supports_response_schema(model) and model not in _SCHEMA_REJECTED:
+        mode = "native"
+    else:
+        mode = "tool"
     tool_name = "submit_" + re.sub(r"(?<!^)(?=[A-Z])", "_", output_model.__name__).lower()
     grammar = _grammar_schema(schema)
-    structured = _structured_args(native, output_model.__name__, tool_name, grammar)
     meta = {"created_by": role, "run_id": ctx.run_id, "milestone_id": ctx.milestone_id}
 
     error = ""
     attempts = ctx.settings.budgets.structured_attempts
     for attempt in range(1, attempts + 1):
-        req = LLMRequest(
-            role=role,
-            model=model,
-            messages=list(messages),
-            max_tokens=max_out,
-            thinking=thinking,
-            extra=extra,
-            **structured,
-        )
-        try:
-            resp = _invoke(req, ctx)
-        except LLMCallError as e:
-            if not (native and _is_schema_rejection(e)):
-                raise
-            # strict providers (OpenAI) refuse schemas with optional fields; a forced tool call
-            # carries the same schema without that rule. Remembered per model for this process.
-            _SCHEMA_REJECTED.add(model)
-            log.warning("schema rejected; using a forced tool call", extra={"model": model})
-            native = False
-            structured = _structured_args(native, output_model.__name__, tool_name, grammar)
+        while True:  # step down native → forced tool → JSON text while the provider refuses
             req = LLMRequest(
                 role=role,
                 model=model,
@@ -133,9 +118,27 @@ def call_structured[C: BaseModel](
                 max_tokens=max_out,
                 thinking=thinking,
                 extra=extra,
-                **structured,
+                **_mode_args(mode, output_model.__name__, tool_name, grammar),
             )
-            resp = _invoke(req, ctx)
+            try:
+                resp = _invoke(req, ctx)
+                break
+            except LLMCallError as e:
+                if mode == "native" and _is_schema_rejection(e):
+                    # strict providers (OpenAI) and Anthropic's grammar limit refuse the schema;
+                    # a forced tool call carries the same schema without that rule
+                    _SCHEMA_REJECTED.add(model)
+                    log.warning("schema rejected; using a forced tool call", extra={"model": model})
+                    mode = "tool"
+                elif mode == "tool" and _is_forced_tool_refusal(e):
+                    # e.g. Anthropic with thinking: no forced tool use. The schema is in the
+                    # prompt, so the answer comes back as JSON text and is validated as usual
+                    _TEXT_ONLY.add(model)
+                    log.warning("forced tool refused; asking for JSON text", extra={"model": model})
+                    mode = "text"
+                else:
+                    raise
+        native = mode != "tool"
         raw = _raw_output(resp, native)
         try:
             parsed = _parse(raw, output_model, meta, model)
@@ -153,6 +156,7 @@ def call_structured[C: BaseModel](
 
 
 _SCHEMA_REJECTED: set[str] = set()  # models whose provider refused our response_format schema
+_TEXT_ONLY: set[str] = set()  # ... and that refuse forced tool calls too: plain JSON text
 
 
 def _is_schema_rejection(e: Exception) -> bool:
@@ -175,6 +179,17 @@ def _grammar_schema(schema: Any) -> Any:
     if isinstance(schema, list):
         return [_grammar_schema(v) for v in schema]
     return schema
+
+
+def _is_forced_tool_refusal(e: Exception) -> bool:
+    msg = str(e).lower()
+    return "forced tool use" in msg or ("tool_choice" in msg and "not support" in msg)
+
+
+def _mode_args(mode: str, name: str, tool_name: str, schema: Any) -> dict[str, Any]:
+    if mode == "text":
+        return {}  # the schema is in the system prompt; the reply is parsed as JSON text
+    return _structured_args(mode == "native", name, tool_name, schema)
 
 
 def _structured_args(native: bool, name: str, tool_name: str, schema: Any) -> dict[str, Any]:
