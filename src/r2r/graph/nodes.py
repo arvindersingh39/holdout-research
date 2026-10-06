@@ -68,6 +68,7 @@ from r2r.llm.gateway import ContractViolation
 from r2r.llm.tokens import estimate_tokens
 from r2r.log import get_logger
 from r2r.publish.collect import collect_from_states
+from r2r.publish.export import export_milestone
 from r2r.publish.run import run_publish
 from r2r.retrieval.context_pack import build_pack
 
@@ -846,6 +847,7 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
         "review_flags": [],
     }
     if d.action in ("approve", "edit"):
+        _export(state, deps)
         update |= reset | {
             "roadmap": mark_done(state["roadmap"], digest.milestone_id),
             "cycle": state.get("cycle", 1) + 1,
@@ -853,6 +855,17 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
     else:  # redirect: milestone stays open; the planner decides with the note
         update |= reset
     return update
+
+
+def _export(state: PipelineState, deps: RunDeps) -> None:
+    """D95: copy the approved milestone to the owner's export folder; never blocks the run."""
+    if deps.export_dir is None:
+        return
+    try:
+        folder = export_milestone(deps.export_dir, deps.workspace(), state)
+        log.warning("milestone exported", extra={"folder": str(folder)})
+    except Exception as e:  # an export problem must not lose the owner's decision
+        log.warning("export failed", extra={"error": str(e)[:300]})
 
 
 def coder_gate(state: PipelineState, deps: RunDeps) -> Update:

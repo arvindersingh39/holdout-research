@@ -119,7 +119,12 @@ ChannelOpt = Annotated[
 ]
 
 
-def _deps(run_id: str, runs_base: Path | None, proposal: Path | None = None):
+def _deps(
+    run_id: str,
+    runs_base: Path | None,
+    proposal: Path | None = None,
+    export_dir: Path | None = None,
+):
     from r2r.graph.deps import RunDeps
     from r2r.log import configure_logging
 
@@ -129,7 +134,13 @@ def _deps(run_id: str, runs_base: Path | None, proposal: Path | None = None):
     base = runs_base or root
     if proposal is not None:
         return RunDeps.create(
-            run_id, proposal, settings, make_client(settings), base, root / "prompts"
+            run_id,
+            proposal,
+            settings,
+            make_client(settings),
+            base,
+            root / "prompts",
+            export_dir=export_dir,
         )
     try:
         return RunDeps.load(
@@ -234,13 +245,17 @@ def run(
     runs_base: RunsBase = None,
     channel: ChannelOpt = None,
     autopilot: AutopilotOpt = False,
+    export_dir: Annotated[
+        Path | None,
+        typer.Option(help="Copy each approved milestone's code and summary here (D95)"),
+    ] = None,
 ) -> None:
     """Start a run: retrieve, plan, and stop at every human gate (or routine ones on autopilot)."""
     if not (proposal / "proposal.md").is_file():
         console.print(f"[red]{proposal}/proposal.md not found[/]")
         raise typer.Exit(2)
     run_id = run_id or f"{proposal.resolve().name}-{datetime.now():%Y%m%d-%H%M%S}"
-    deps = _with_autopilot(_deps(run_id, runs_base, proposal), autopilot)
+    deps = _with_autopilot(_deps(run_id, runs_base, proposal, export_dir), autopilot)
     _drive(deps, start=True, channel=channel)
 
 

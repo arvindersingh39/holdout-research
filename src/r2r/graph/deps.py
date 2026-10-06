@@ -34,6 +34,8 @@ class RunDeps:
     sandbox_factory: Callable[[Workspace], SandboxBackend] | None = None
     # set by open_graph: the run's earlier states, newest first (publishing reads past milestones)
     state_history: Callable[[], Iterable[Mapping[str, Any]]] | None = None
+    # D95: approved milestones are copied here (e.g. the owner's project folder)
+    export_dir: Path | None = None
     ledger: Ledger = field(init=False)
     blobs: BlobStore = field(init=False)
     index: VectorIndex = field(init=False)
@@ -77,6 +79,7 @@ class RunDeps:
         prompts_dir: Path,
         retry_wait_max_s: float = 20.0,
         sandbox_factory: Callable[[Workspace], SandboxBackend] | None = None,
+        export_dir: Path | None = None,
     ) -> RunDeps:
         paths = run_paths(run_id, base=runs_base, create=True)
         meta = {
@@ -84,6 +87,8 @@ class RunDeps:
             "proposal_dir": str(Path(proposal_dir).resolve()),
             "created": datetime.now(UTC).isoformat(),
         }
+        if export_dir is not None:
+            meta["export_dir"] = str(Path(export_dir).expanduser().resolve())
         (paths.root / "run.json").write_text(json.dumps(meta, indent=2))
         return cls(
             run_id,
@@ -94,6 +99,7 @@ class RunDeps:
             prompts_dir,
             retry_wait_max_s,
             sandbox_factory,
+            export_dir=Path(meta["export_dir"]) if "export_dir" in meta else None,
         )
 
     @classmethod
@@ -121,4 +127,5 @@ class RunDeps:
             prompts_dir,
             retry_wait_max_s,
             sandbox_factory,
+            export_dir=Path(meta["export_dir"]) if meta.get("export_dir") else None,
         )
