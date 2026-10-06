@@ -64,10 +64,10 @@ def _is_stub(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 
 
 def record_stubs(root: Path, paths: list[str]) -> list[Stub]:
-    """The stub functions and methods in the designer's Python files under src/."""
+    """The stub functions and methods in the designer's Python files under src/ and scripts/."""
     stubs: list[Stub] = []
     for rel in paths:
-        if not (rel.startswith("src/") and rel.endswith(".py")):
+        if not (rel.startswith(("src/", "scripts/")) and rel.endswith(".py")):
             continue
         tree = ast.parse((root / rel).read_text())
         for name, fn in _defs(tree).items():
@@ -79,6 +79,8 @@ def record_stubs(root: Path, paths: list[str]) -> list[Stub]:
 def _modules(stubs: list[Stub]) -> list[str]:
     mods = []
     for s in stubs:
+        if not s["path"].startswith("src/"):  # scripts are run, not imported as package modules
+            continue
         parts = Path(s["path"]).with_suffix("").parts[1:]  # drop "src"
         if parts and parts[-1] == "__init__":
             parts = parts[:-1]

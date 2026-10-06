@@ -21,7 +21,8 @@ benchmarks: be exact.
   milestone draws figures (each is a stub file under `figures/`).
 
 ## Files: stubs only
-- Under `src/<package>/` (and `bench/` or `figures/` for scripts the spec names): every public
+- Under `src/<package>/` (and `scripts/` for command-line entry points, `bench/` or `figures/` for
+  scripts the spec names): every public
   function and method with its final signature, type hints and a docstring stating what it
   returns, and a body that only raises `NotImplementedError`. Purpose `"stub"`.
 - Include `__init__.py` files for new packages. Small helper constants or dataclasses that carry

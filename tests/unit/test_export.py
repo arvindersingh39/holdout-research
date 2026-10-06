@@ -103,3 +103,11 @@ def test_binary_results_are_exported_intact(ws: Workspace, tmp_path: Path) -> No
     Git(ws).commit("tensors")
     folder = export_milestone(tmp_path / "export", ws, _state())
     assert (folder / "code/results/episodes.pt").read_bytes() == blob
+
+
+def test_scripts_are_exported(ws: Workspace, tmp_path: Path) -> None:
+    (ws.root / "scripts").mkdir(exist_ok=True)
+    (ws.root / "scripts/report.py").write_text("print('r')\n")
+    Git(ws).commit("script")
+    folder = export_milestone(tmp_path / "export", ws, _state())
+    assert (folder / "code/scripts/report.py").is_file()

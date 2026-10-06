@@ -216,3 +216,8 @@ def test_binary_files_are_described_not_decoded(tools: CoderTools) -> None:
     (tools.ws.root / "results/net.pt").write_bytes(b"PK\x03\x04\x00\xff\xfe" * 100)
     out = _call(tools, "read_file", path="results/net.pt")
     assert "binary file" in out and "700 bytes" in out and not out.startswith("error")
+
+
+def test_coder_may_write_command_line_scripts(tools: CoderTools) -> None:
+    out = _call(tools, "create_file", path="scripts/report.py", content="print('r')\n")
+    assert out.startswith("wrote") and (tools.ws.root / "scripts/report.py").is_file()

@@ -136,3 +136,20 @@ def test_many_long_failures_are_shrunk_to_fit_the_cap(ws: Workspace) -> None:
         ws, LocalProcessBackend(ws), stubs, None, timeout_s=60, run_id="r", milestone_id="M1"
     )
     assert not r.passed and r.n_failed == 12 and r.failures  # built, within its cap
+
+
+def test_script_stubs_must_be_implemented_but_are_not_imported(ws: Workspace) -> None:
+    (ws.root / "scripts").mkdir(exist_ok=True)
+    (ws.root / "scripts/report.py").write_text(
+        "def main() -> None:\n    raise NotImplementedError\n"
+    )
+    (ws.root / "src/sq/core.py").write_text(IMPL)
+    stubs = record_stubs(ws.root, ["src/sq/core.py", "scripts/report.py"])
+    assert ("scripts/report.py", "main") in {(s["path"], s["name"]) for s in stubs}
+    run = lambda: check_code(  # noqa: E731
+        ws, LocalProcessBackend(ws), stubs, None, timeout_s=60, run_id="r", milestone_id="M1"
+    )
+    assert not run().passed
+    (ws.root / "scripts/report.py").write_text("def main() -> None:\n    print('report')\n")
+    r = run()
+    assert r.passed and not any("scripts" in f.test_id for f in r.failures)

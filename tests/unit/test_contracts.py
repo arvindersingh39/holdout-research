@@ -293,3 +293,10 @@ def test_revisions_answer_every_item() -> None:
     assert unanswered(r.responses, ["C1"]) == [] and unanswered(r.responses, ["C1", "C2"]) == ["C2"]
     with pytest.raises(ValidationError):
         CritiqueResponse(id="C1", verdict="ignored", text="x")
+
+
+def test_command_line_scripts_may_be_designed() -> None:
+    """D97: scripts/ holds command-line entry points (both models reach for it)."""
+    data = math_design().model_dump()
+    data["files"].append({"path": "scripts/report.py", "purpose": "stub", "content": "x = 1\n"})
+    assert MathDesign.model_validate(data).files[-1].path == "scripts/report.py"

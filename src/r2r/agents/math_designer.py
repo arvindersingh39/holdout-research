@@ -27,7 +27,7 @@ from r2r.llm.gateway import CallContext, call_structured
 from r2r.retrieval.context_pack import ContextPack
 
 ROLE = "math_designer"
-DESIGN_DIRS = ("src", "bench", "figures")
+DESIGN_DIRS = ("src", "bench", "figures", "scripts")
 
 
 class DesignError(ValueError):

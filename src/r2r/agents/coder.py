@@ -24,7 +24,7 @@ from r2r.log import get_logger
 log = get_logger("r2r.agents.coder")
 
 ROLE = "coder"
-WRITE_DIRS = ("src", "bench", "figures")
+WRITE_DIRS = ("src", "bench", "figures", "scripts")
 NUDGE = (
     "Continue with the tools: write the code with create_file/edit_file, then call check_code. "
     "The session ends when check_code passes."

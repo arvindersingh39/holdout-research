@@ -20,7 +20,8 @@ algorithm step by step.
 
 ## Tools
 - `list_files`, `read_file`: read the stubs and the code they build on before writing.
-- `create_file`, `edit_file`: write code under `src/`, `bench/` and `figures/` only. `edit_file`
+- `create_file`, `edit_file`: write code under `src/`, `scripts/` (command-line entry points),
+  `bench/` and `figures/` only. `edit_file`
   needs an exact, unique `old` snippet.
 - `append_file`: your replies have an output limit: write a long file in parts (`create_file`
   with the first part, then `append_file`), never all at once.

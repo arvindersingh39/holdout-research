@@ -123,7 +123,7 @@ class MathSpec(Contract):
     unchecked_criteria: SkipJsonSchema[dict[str, str]] = {}
 
 
-STUB_DIRS = ("src/", "bench/", "figures/")
+STUB_DIRS = ("src/", "bench/", "figures/", "scripts/")  # scripts/: command-line entry points (D97)
 
 
 class MathDesign(Contract):
@@ -139,7 +139,8 @@ class MathDesign(Contract):
         bad = [f.path for f in self.files if not f.path.startswith(STUB_DIRS)]
         if bad:
             raise ValueError(
-                f"the design writes stubs only, under src/, bench/ or figures/ (D93): {bad}"
+                "the design writes stubs only, under src/, bench/, figures/ or scripts/ (D93): "
+                f"{bad}"
             )
         named = list(self.spec.figure_scripts)
         if self.spec.bench:

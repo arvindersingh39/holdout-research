@@ -11,7 +11,7 @@ from pathlib import Path
 
 from r2r.store.runs import RunPaths
 
-DIRS = ("src", "bench", "figures", "tests/frozen", "checks")
+DIRS = ("src", "bench", "figures", "scripts", "tests/frozen", "checks")
 FROZEN_DIRS = ("tests/frozen", "checks")
 RESULTS_DIR = ".r2r"  # per-run harness output (JUnit XML), recreated for every run
 

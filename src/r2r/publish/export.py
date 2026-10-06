@@ -19,7 +19,7 @@ from r2r.graph.render import render, render_review
 from r2r.harness.gitops import Git
 from r2r.harness.workspace import Workspace
 
-CODE_DIRS = ("src", "bench", "figures", "results")
+CODE_DIRS = ("src", "bench", "figures", "scripts", "results")
 _SKIP = {"__pycache__", ".pytest_cache"}
 
 
