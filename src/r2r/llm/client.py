@@ -129,6 +129,9 @@ class LiteLLMClient:
             raise TransientLLMError(_short(e)) from None
         except Exception as e:
             self._trace(req, None, _short(e))
+            # a provider's generic 5xx (OpenRouter: "something went wrong") is transient too
+            if isinstance(e, litellm.APIError) and (getattr(e, "status_code", None) or 0) >= 500:
+                raise TransientLLMError(_short(e)) from None
             raise LLMCallError(_short(e)) from None
         latency = int((time.monotonic() - start) * 1000)
 

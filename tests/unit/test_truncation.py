@@ -106,3 +106,37 @@ def test_client_marks_length_finish_as_truncated(monkeypatch: pytest.MonkeyPatch
         )
         monkeypatch.setattr(litellm, "completion", lambda r=resp, **kw: r)
         assert client.complete(req).truncated is cut, reason
+
+
+def test_provider_server_errors_are_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """study-4: OpenRouter's 'Sorry, something went wrong' arrives as a generic APIError (5xx);
+    it is transient. Request errors (4xx) are not."""
+    import litellm
+
+    from r2r.llm.client import LiteLLMClient, LLMRequest, TransientLLMError
+    from r2r.settings import Secrets
+
+    client = LiteLLMClient(Secrets())
+    client._tracer = type("T", (), {"record": lambda self, *a: None})()
+    req = LLMRequest(role="coder", model="openrouter/openai/gpt-6.1-sol", messages=[], max_tokens=5)
+
+    def boom(status):
+        def f(**kw):
+            raise litellm.APIError(
+                status_code=status,
+                message="Sorry, something went wrong.",
+                llm_provider="openrouter",
+                model="x",
+            )
+
+        return f
+
+    monkeypatch.setattr(litellm, "completion", boom(500))
+    with pytest.raises(TransientLLMError):
+        client.complete(req)
+    monkeypatch.setattr(litellm, "completion", boom(400))
+    from r2r.llm.client import LLMCallError
+
+    with pytest.raises(LLMCallError) as e:
+        client.complete(req)
+    assert not isinstance(e.value, TransientLLMError)
