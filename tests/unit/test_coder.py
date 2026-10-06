@@ -208,3 +208,11 @@ def test_coder_sees_benchmark_refs_never_values(
     assert payload["benchmarks"] == bench and payload["reproduce_script"] == "bench/reproduce_m1.py"
     assert payload["results_file"] == "results/benchmarks/m1.json"
     assert "recorded 0.41" in payload["mismatches"]
+
+
+def test_binary_files_are_described_not_decoded(tools: CoderTools) -> None:
+    """Saved tensors (.pt) and other binary outputs: the coder gets a note, not a crash."""
+    (tools.ws.root / "results").mkdir(exist_ok=True)
+    (tools.ws.root / "results/net.pt").write_bytes(b"PK\x03\x04\x00\xff\xfe" * 100)
+    out = _call(tools, "read_file", path="results/net.pt")
+    assert "binary file" in out and "700 bytes" in out and not out.startswith("error")

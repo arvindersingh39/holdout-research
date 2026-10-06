@@ -145,7 +145,12 @@ class CoderTools:
         return "\n".join(files) or "(no files)"
 
     def read_file(self, args: ReadArgs) -> str:
-        lines = self._readable(args.path).read_text().splitlines()
+        path = self._readable(args.path)
+        try:
+            lines = path.read_text().splitlines()
+        except UnicodeDecodeError:  # saved tensors (.pt), arrays, figures: describe, don't decode
+            size = path.stat().st_size
+            return f"{args.path}: binary file ({size} bytes); inspect it with code, not read_file"
         start = max(1, args.start)
         end = min(len(lines), args.end or len(lines), start + READ_LINES - 1)
         body = "\n".join(f"{n:>5}  {lines[n - 1]}" for n in range(start, end + 1))

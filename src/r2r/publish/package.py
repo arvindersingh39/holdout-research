@@ -22,7 +22,7 @@ from r2r.harness.workspace import Workspace
 from r2r.publish.collect import RunRecord
 
 SANDBOX_REQUIREMENTS = Path(__file__).resolve().parents[3] / "sandbox" / "requirements.txt"
-THIRD_PARTY = ("numpy", "scipy", "pandas", "numba", "sympy", "matplotlib")
+THIRD_PARTY = ("numpy", "scipy", "pandas", "numba", "sympy", "matplotlib", "torch")
 _SKIP = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache")
 CI = """\
 name: tests

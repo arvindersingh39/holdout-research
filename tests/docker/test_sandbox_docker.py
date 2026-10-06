@@ -172,3 +172,22 @@ def test_cli_sandbox_check(image: str) -> None:
     result = CliRunner().invoke(cli.app, ["sandbox", "check"])
     assert result.exit_code == 0, result.output
     assert result.output.count("✓") == 4 and "OK" in result.output
+
+
+def test_cpu_torch_saves_and_loads_tensors(ws: Workspace, box: DockerBackend) -> None:
+    """Owner decision (D96): CPU-only PyTorch in the sandbox, so packages save RL training data
+    as .pt files. Works offline, with a read-only root, as the non-root user."""
+    code = (
+        "import torch, numpy as np\n"
+        "assert not torch.cuda.is_available() and torch.__version__.endswith('+cpu')\n"
+        "data = {'A': torch.from_numpy(np.eye(3)), 'I': torch.zeros(181, 3, dtype=torch.float64)}\n"
+        "torch.save(data, 'results/net.pt')\n"
+        "back = torch.load('results/net.pt', weights_only=True)\n"
+        "assert torch.equal(back['A'], data['A']) and back['I'].shape == (181, 3)\n"
+        "print('ok', torch.__version__)\n"
+    )
+    (ws.root / "results").mkdir(exist_ok=True)
+    res = box.run(py(code), 180)
+    assert res.exit_code == 0, res.stderr[-2000:]
+    assert res.stdout.startswith("ok 2.14.1+cpu")
+    assert (ws.root / "results/net.pt").stat().st_size > 0

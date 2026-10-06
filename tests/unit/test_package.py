@@ -95,3 +95,12 @@ def test_build_wheel_command(tmp_path: Path) -> None:
     assert cmd[1:4] == ["build", "--wheel", "--out-dir"] and cmd[-1] == str(tmp_path)
     assert set(env) <= {"PATH", "HOME", "UV_CACHE_DIR"}  # no secrets reach the build
     assert wheel.name.endswith(".whl")
+
+
+def test_torch_is_declared_when_the_package_uses_it(tmp_path: Path) -> None:
+    from r2r.publish.package import _dependencies
+
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg/save.py").write_text("import torch\nimport numpy as np\n")
+    deps = _dependencies(tmp_path)
+    assert any(d.startswith("torch") for d in deps) and any(d.startswith("numpy") for d in deps)

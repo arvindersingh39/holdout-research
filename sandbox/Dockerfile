@@ -21,6 +21,11 @@ RUN set -eux; \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
+# D96 (owner decision): CPU-only PyTorch, so generated packages can save RL training data as .pt.
+# The CPU index has no CUDA libraries; containers still run with no network.
+ARG TORCH_VERSION=2.14.1+cpu
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+
 ENV TECTONIC_CACHE_DIR=/opt/tectonic-cache
 COPY warmup.tex warmup_plain.tex /opt/warmup/
 RUN mkdir -p /opt/tectonic-cache /tmp/warm \
@@ -34,6 +39,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOME=/tmp \
     NUMBA_CACHE_DIR=/tmp/numba \
-    MPLCONFIGDIR=/tmp/mpl
+    MPLCONFIGDIR=/tmp/mpl \
+    TORCH_HOME=/tmp/torch
 USER sandbox
 WORKDIR /workspace

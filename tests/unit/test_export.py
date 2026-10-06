@@ -95,3 +95,11 @@ def test_exports_committed_main_not_uncommitted_files(ws: Workspace, tmp_path: P
 def test_slug_is_safe() -> None:
     assert slug("M3", "Baselines B1\u2013B5 & ../statistics!") == "M3_baselines-b1-b5-statistics"
     assert len(slug("M3", "x" * 300)) <= 64
+
+
+def test_binary_results_are_exported_intact(ws: Workspace, tmp_path: Path) -> None:
+    blob = bytes(range(256)) * 40
+    (ws.root / "results/episodes.pt").write_bytes(blob)
+    Git(ws).commit("tensors")
+    folder = export_milestone(tmp_path / "export", ws, _state())
+    assert (folder / "code/results/episodes.pt").read_bytes() == blob
