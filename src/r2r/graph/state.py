@@ -6,7 +6,10 @@ from typing import Literal, TypedDict
 
 from r2r.contracts import (
     CoordinatorVerdict,
+    Critique,
+    CritiqueResponse,
     HumanDecision,
+    MathDesign,
     MathSpec,
     MilestoneSpec,
     OversightFlag,
@@ -62,3 +65,15 @@ class PipelineState(TypedDict, total=False):
     budget_blocked: str | None  # node that hit BudgetExceeded (D46)
     budget_message: str | None
     budget_retry: str | None  # where the budget gate sends the run next
+    # D94: one-round reflection
+    plan_review: bool  # a model-made roadmap draft awaits its critique
+    plan_base: Roadmap | None  # the roadmap before this draft (finished milestones stay)
+    plan_critique: Critique | None
+    plan_responses: list[CritiqueResponse]
+    plan_revision_failed: bool
+    design_review: bool  # a design draft awaits its critique (not yet written)
+    design_draft: MathDesign | None
+    design_critique: Critique | None
+    design_responses: list[CritiqueResponse]
+    design_revision_failed: bool
+    review_flags: list[OversightFlag]  # serious items rebutted or unanswered: the owner decides

@@ -21,6 +21,8 @@ overseer:                         # advisor: evidence-cited briefings, never rou
   flags_shown: 6                  # newest flags shown at each gate
   flag_chars: 280                 # longer flags are shortened at gates (full text: r2r show)
   evidence_chars: 3000            # cap per evidence item (test file, failure, spec) it reads
+  reflect_plan: false             # D94 (on in config/; tests turn it on explicitly): overseer critiques each new roadmap; the planner revises once
+  reflect_design: false           # D94: overseer critiques each design; the designer revises once
 publish:                          # Phase 8 (D67)
   modes: [paper, package]
   fix_attempts: 1                 # writer fixes after a failed LaTeX compile

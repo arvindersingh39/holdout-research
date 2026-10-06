@@ -2,14 +2,25 @@
 
 No tests, checks or reference solutions: the designer states the mathematics exactly and writes
 stubs with the final signatures; the coder implements them and the stub check (plain Python)
-confirms every stub is implemented.
+confirms every stub is implemented. D94: the draft gets one overseer critique, and
+`revise_design` answers it (every item changed or rebutted) before anything is written.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel
 
-from r2r.contracts import MathDesign, MathSpec, Milestone, MilestoneSpec
+from r2r.contracts import (
+    Critique,
+    CritiqueItem,
+    CritiqueResponse,
+    DesignRevision,
+    MathDesign,
+    MathSpec,
+    Milestone,
+    MilestoneSpec,
+    unanswered,
+)
 from r2r.harness.gitops import Git
 from r2r.harness.workspace import UnsafePath, Workspace, safe_path
 from r2r.llm.gateway import CallContext, call_structured
@@ -31,6 +42,8 @@ class DesignInput(BaseModel):
     feedback: str | None = None  # why the previous design was rejected, or coordinator notes
     benchmarks: list[dict[str, str]] = []  # refs to reproduce with descriptions; never values
     proposal: str = ""  # the owner's full proposal when short, inside <document> tags
+    draft: MathDesign | None = None  # D94: your draft, to revise
+    critique: list[CritiqueItem] = []  # D94: answer every item: changed or rebutted
 
 
 def run_math_designer(
@@ -53,6 +66,42 @@ def run_math_designer(
         proposal=proposal,
     )
     return call_structured(ROLE, ROLE, payload, MathDesign, ctx)
+
+
+def revise_design(
+    spec: MilestoneSpec,
+    milestone: Milestone,
+    pack: ContextPack,
+    existing_files: list[str],
+    ctx: CallContext,
+    draft: MathDesign,
+    critique: Critique,
+    benchmarks: list[dict[str, str]] | None = None,
+    proposal: str = "",
+) -> tuple[MathDesign, list[CritiqueResponse]]:
+    """D94: the draft revised once against the overseer's critique; every item answered."""
+    payload = DesignInput(
+        spec=spec,
+        milestone=milestone,
+        context=pack.text,
+        existing_files=existing_files,
+        benchmarks=benchmarks or [],
+        proposal=proposal,
+        draft=draft,
+        critique=critique.items,
+    )
+    ids = [i.id for i in critique.items]
+
+    def answered(r: DesignRevision) -> DesignRevision:
+        missing = unanswered(r.responses, ids)
+        if missing:
+            raise ValueError(
+                f"answer every critique item (changed or rebutted); missing: {missing}"
+            )
+        return r
+
+    out = call_structured(ROLE, ROLE, payload, DesignRevision, ctx, finalize=answered)
+    return out.design, [r for r in out.responses if r.id in ids]
 
 
 def _reset_code(ws: Workspace) -> None:

@@ -14,17 +14,30 @@ from langgraph.types import interrupt
 
 from r2r.agents.coder import CoderTools, run_coder_session
 from r2r.agents.coordinator import run_coordinator
-from r2r.agents.long_planner import run_long_planner
-from r2r.agents.math_designer import DesignError, run_math_designer, write_design
-from r2r.agents.overseer import collect_evidence, run_overseer
+from r2r.agents.long_planner import revise_roadmap, run_long_planner
+from r2r.agents.math_designer import (
+    DesignError,
+    revise_design,
+    run_math_designer,
+    write_design,
+)
+from r2r.agents.overseer import collect_evidence, run_critique, run_overseer
 from r2r.agents.retriever import run_retriever
 from r2r.agents.short_planner import run_short_planner
-from r2r.contracts import HumanDecision, Milestone, Roadmap, VerificationReport
+from r2r.contracts import (
+    Critique,
+    HumanDecision,
+    MathDesign,
+    Milestone,
+    OversightFlag,
+    Roadmap,
+    VerificationReport,
+)
 from r2r.contracts.oversight import OversightPoint
 from r2r.digest.builder import build_digest, write_deviations
 from r2r.graph.deps import RunDeps
 from r2r.graph.gates import GateRequest, gate_request
-from r2r.graph.render import render
+from r2r.graph.render import render, render_review
 from r2r.graph.routing import (
     advance_without_replan,
     current_on_open,
@@ -129,19 +142,79 @@ def long_plan(state: PipelineState, deps: RunDeps) -> Update:
         known_ref=partial(_known_ref, _reference(deps)),
     )
     new = current_on_open(new)
+    cleared = {"human_note": None, "spec": None, "verdict": None, "split_request": False}
+    if _reflect(state, deps, "plan") and next_milestone(new) is not None:
+        # D94: the draft is critiqued and revised once before the gate decision
+        return cleared | {"roadmap": new, "plan_base": old, "plan_review": True}
+    return cleared | {"roadmap": new, "approved_roadmap": _approved(state, deps, new)}
+
+
+def _approved(state: PipelineState, deps: RunDeps, new: Roadmap) -> Roadmap | None:
+    """The roadmap counted as approved: the new one when no gate is needed."""
     gates = deps.settings.budgets.gates
     approved = state.get("approved_roadmap")
     if approved is None:
         needs_gate = gates.approve_first_roadmap
     else:
         needs_gate = gates.roadmap_changes == "always" or is_material_change(approved, new)
+    return approved if needs_gate else new
+
+
+def _reflect(state: PipelineState, deps: RunDeps, kind: str) -> bool:
+    """D94: one overseer critique of a new roadmap or design, when enabled and under the cap."""
+    ov = deps.settings.budgets.overseer
+    on = ov.enabled and (ov.reflect_plan if kind == "plan" else ov.reflect_design)
+    return on and state.get("oversee_calls", 0) < ov.max_calls_milestone
+
+
+def _contested(critique: Critique, responses: list, failed: bool) -> list[OversightFlag]:
+    """Serious items the author rebutted or left unanswered: the owner decides, never autopilot."""
+    answered = {r.id: r.verdict for r in responses}
+    out = []
+    for item in critique.items:
+        verdict = "revision failed" if failed else answered.get(item.id, "unanswered")
+        if item.severity == "high" and verdict != "changed":
+            text = f"Overseer critique {item.id} ({verdict}): {item.text}"
+            out.append(OversightFlag(severity="high", text=text[:600], evidence=item.evidence))
+    return out
+
+
+def critique_plan(state: PipelineState, deps: RunDeps) -> Update:
+    evidence = collect_evidence(
+        state, "plan", max_chars=deps.settings.budgets.overseer.evidence_chars
+    )
+    critique = run_critique("plan", state["roadmap"].goal, None, evidence, deps.ctx())
+    return {"plan_critique": critique, "oversee_calls": state.get("oversee_calls", 0) + 1}
+
+
+def revise_plan(state: PipelineState, deps: RunDeps) -> Update:
+    """D94: the planner answers the critique once; a failed revision keeps the valid draft."""
+    draft, critique = state["roadmap"], state["plan_critique"]
+    new, responses, failed = draft, [], False
+    if critique.items:
+        try:
+            revised, responses = revise_roadmap(
+                state["brief"],
+                state.get("plan_base"),
+                draft,
+                critique,
+                deps.ctx(briefing=_briefing(state, "long_planner")),
+                proposal=_proposal_text(state, deps),
+                benchmarks=_outline(deps),
+                known_ref=partial(_known_ref, _reference(deps)),
+            )
+            new = current_on_open(revised)
+        except ContractViolation as e:
+            failed = True
+            log.warning("roadmap revision failed; draft kept", extra={"error": str(e)[:300]})
     return {
         "roadmap": new,
-        "approved_roadmap": approved if needs_gate else new,
-        "human_note": None,
-        "spec": None,
-        "verdict": None,
-        "split_request": False,
+        "approved_roadmap": _approved(state, deps, new),
+        "plan_review": False,
+        "plan_base": None,
+        "plan_responses": responses,
+        "plan_revision_failed": failed,
+        "review_flags": _contested(critique, responses, failed),
     }
 
 
@@ -253,49 +326,49 @@ def _coordinator_notes(state: PipelineState) -> str | None:
 DESIGN_TRIES = 2
 
 
-def design(state: PipelineState, deps: RunDeps) -> Update:
-    """#4 writes the formulation and stubs (D93). An unusable answer is retried once; a second
-    failure sends the milestone back to the long-term planner with the reason."""
-    m = _milestone(state)
-    spec = state["spec"]
-    ws = deps.workspace()
-    git = Git(ws)
-    git.checkout("main")
+def _design_pack(m: Milestone, deps: RunDeps):
     query = f"{m.title}. " + " ".join(c.text for c in m.acceptance_criteria)
-    pack = build_pack(
+    return build_pack(
         query,
         deps.settings.budgets.context_pack_tokens.math_designer,
         deps.settings.budgets.context_pack.k,
         deps.index,
         deps.blobs,
     )
-    prev = state.get("math_spec")
-    previous = prev if prev is not None and prev.milestone_id == m.id else None
+
+
+def _design_failed(state: PipelineState, m: Milestone, e: Exception) -> Update:
+    """An unusable design: one retry, then back to the long-term planner with the reason."""
     failed = state.get("design_attempts", 0)
-    feedback = state.get("design_feedback") or _coordinator_notes(state)
-    try:
-        out = run_math_designer(
-            spec,
-            m,
-            pack,
-            _existing_files(deps),
-            feedback,
-            deps.ctx(m.id, _briefing(state, "math_designer")),
-            benchmarks=_benchmarks(m, deps),
-            proposal=_proposal_text(state, deps),
-        )
-        written = write_design(ws, out, previous)
-    except (ContractViolation, DesignError) as e:
-        why = f"The previous answer could not be used: {str(e)[:600]}"
-        if failed + 1 < DESIGN_TRIES:
-            return {"design_ok": False, "design_attempts": failed + 1, "design_feedback": why}
-        note = f"{m.id}: the math designer failed twice ({str(e)[:300]}). Simplify or split it."
+    why = f"The previous answer could not be used: {str(e)[:600]}"
+    if failed + 1 < DESIGN_TRIES:
         return {
             "design_ok": False,
-            "design_attempts": 0,
-            "design_feedback": None,
-            "human_note": note,
+            "design_attempts": failed + 1,
+            "design_feedback": why,
+            "design_review": False,
+            "design_draft": None,
         }
+    note = f"{m.id}: the math designer failed twice ({str(e)[:300]}). Simplify or split it."
+    return {
+        "design_ok": False,
+        "design_attempts": 0,
+        "design_feedback": None,
+        "human_note": note,
+        "design_review": False,
+        "design_draft": None,
+    }
+
+
+def _previous(state: PipelineState, m: Milestone):
+    prev = state.get("math_spec")
+    return prev if prev is not None and prev.milestone_id == m.id else None
+
+
+def _commit_design(state: PipelineState, deps: RunDeps, m: Milestone, out: MathDesign) -> Update:
+    ws = deps.workspace()
+    git = Git(ws)
+    written = write_design(ws, out, _previous(state, m))
     stubs = record_stubs(ws.root, written)
     commit = git.commit(f"{m.id}: math design (stubs)")
     git.branch(f"wip/{m.id}", commit)
@@ -308,6 +381,90 @@ def design(state: PipelineState, deps: RunDeps) -> Update:
         "coder_sessions": 0,
         "test_result": None,
     }
+
+
+def design(state: PipelineState, deps: RunDeps) -> Update:
+    """#4 writes the formulation and stubs (D93). With reflection (D94) the valid draft is kept
+    unwritten for the overseer's critique; otherwise it is written and committed here."""
+    m = _milestone(state)
+    Git(deps.workspace()).checkout("main")
+    feedback = state.get("design_feedback") or _coordinator_notes(state)
+    try:
+        out = run_math_designer(
+            state["spec"],
+            m,
+            _design_pack(m, deps),
+            _existing_files(deps),
+            feedback,
+            deps.ctx(m.id, _briefing(state, "math_designer")),
+            benchmarks=_benchmarks(m, deps),
+            proposal=_proposal_text(state, deps),
+        )
+        if _reflect(state, deps, "design"):
+            return {"design_draft": out, "design_review": True, "design_ok": True}
+        return _commit_design(state, deps, m, out)
+    except (ContractViolation, DesignError) as e:
+        return _design_failed(state, m, e)
+
+
+def critique_design(state: PipelineState, deps: RunDeps) -> Update:
+    """D94: the overseer reads the unwritten draft: its formulation, algorithm and stub code."""
+    m = _milestone(state)
+    draft = state["design_draft"]
+    files = {f.path: f.content for f in draft.files}
+    lim = deps.settings.budgets.overseer
+    evidence = collect_evidence(
+        {**state, "math_spec": draft.spec}, "design", files, lim.evidence_chars
+    )
+    critique = run_critique("design", state["roadmap"].goal, m.id, evidence, deps.ctx(m.id))
+    return {"design_critique": critique, "oversee_calls": state.get("oversee_calls", 0) + 1}
+
+
+def finalize_design(state: PipelineState, deps: RunDeps) -> Update:
+    """D94: the designer answers the critique once, then the design is written. A failed
+    revision keeps the valid draft; a draft that cannot be written is a failed design."""
+    m = _milestone(state)
+    draft, critique = state["design_draft"], state["design_critique"]
+    out, responses, failed = draft, [], False
+    if critique.items:
+        try:
+            out, responses = revise_design(
+                state["spec"],
+                m,
+                _design_pack(m, deps),
+                _existing_files(deps),
+                deps.ctx(m.id, _briefing(state, "math_designer")),
+                draft,
+                critique,
+                benchmarks=_benchmarks(m, deps),
+                proposal=_proposal_text(state, deps),
+            )
+        except ContractViolation as e:
+            failed = True
+            log.warning("design revision failed; draft kept", extra={"error": str(e)[:300]})
+    review = {
+        "design_review": False,
+        "design_draft": None,
+        "design_responses": responses,
+        "design_revision_failed": failed,
+        "review_flags": [
+            *(state.get("review_flags") or []),
+            *_contested(critique, responses, failed),
+        ],
+    }
+    try:
+        return review | _commit_design(state, deps, m, out)
+    except DesignError as e:
+        if out is not draft:  # the revision broke the design: fall back to the valid draft
+            try:
+                return (
+                    review
+                    | {"design_revision_failed": True}
+                    | _commit_design(state, deps, m, draft)
+                )
+            except DesignError:
+                pass
+        return review | _design_failed(state, m, e)
 
 
 def code(state: PipelineState, deps: RunDeps) -> Update:
@@ -488,7 +645,7 @@ def _autopilot(state: PipelineState, deps: RunDeps, gate: str) -> HumanDecision 
     facts = Facts(
         run_id=deps.run_id,
         milestone_id=mid,
-        flags=flags,
+        flags=[*flags, *(state.get("review_flags") or [])],
         tests_passed=None if res is None else res.passed,
         verification=state.get("verification"),
         first_roadmap=state.get("approved_roadmap") is None,
@@ -603,6 +760,14 @@ def roadmap_gate(state: PipelineState, deps: RunDeps) -> Update:
     first = state.get("approved_roadmap") is None
     title = "Approve the first roadmap" if first else f"Approve roadmap changes (v{rm.version})"
     req = gate_request("roadmap", title, rm)
+    review = render_review(
+        "Roadmap review",
+        state.get("plan_critique"),
+        state.get("plan_responses"),
+        bool(state.get("plan_revision_failed")),
+    )
+    if review:
+        req = req.model_copy(update={"markdown": req.markdown + "\n\n" + review})
     brief = state.get("brief")
     if brief is not None and brief.benchmarks and any(m.benchmarks for m in rm.milestones):
         req = req.model_copy(
@@ -611,7 +776,14 @@ def roadmap_gate(state: PipelineState, deps: RunDeps) -> Update:
     d = _ask(state, deps, req)
     # the flags were about this roadmap: settled by the owner's decision either way (the
     # briefings stay: they guide the planners)
-    update: Update = {"human_decision": d, "flags": []}
+    update: Update = {
+        "human_decision": d,
+        "flags": [],
+        "review_flags": [],
+        "plan_critique": None,
+        "plan_responses": [],
+        "plan_revision_failed": False,
+    }
     if d.action == "approve":
         update["approved_roadmap"] = rm
     elif d.action == "edit":
@@ -628,6 +800,14 @@ def roadmap_gate(state: PipelineState, deps: RunDeps) -> Update:
 def result_gate(state: PipelineState, deps: RunDeps) -> Update:
     digest = state["digest"]
     md = render(digest) + "\n\n" + render_verification(state.get("verification"))
+    review = render_review(
+        "Design review",
+        state.get("design_critique"),
+        state.get("design_responses"),
+        bool(state.get("design_revision_failed")),
+    )
+    if review:
+        md += "\n\n" + review
     d = _ask(
         state,
         deps,
@@ -660,6 +840,10 @@ def result_gate(state: PipelineState, deps: RunDeps) -> Update:
         "flags": [],
         "oversee_calls": 0,
         "coder_message": None,
+        "design_critique": None,
+        "design_responses": [],
+        "design_revision_failed": False,
+        "review_flags": [],
     }
     if d.action in ("approve", "edit"):
         update |= reset | {

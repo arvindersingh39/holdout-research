@@ -4,8 +4,9 @@ flowchart TD
     R -- "ResearchBrief ≤4k<br/>+ benchmarks (quote-checked by code)" --> LP["#2 Long-term planner<br/>Claude Opus 5.5"]
     R -. "benchmarks.json + owner data<br/>(run folder, never the workspace)" .-> REF[("Reference values")]
 
-    LP -- "Roadmap ≤20k<br/>milestones name benchmark refs" --> OVP(["#8 Overseer: plan<br/>GPT 6.1 Sol"])
-    OVP --> GR{{"Gate: approve roadmap<br/>(benchmarks + quotes shown)"}}
+    LP -- "draft roadmap<br/>milestones name benchmark refs" --> OVP(["#8 Overseer: critique<br/>GPT 6.1 Sol"])
+    OVP -- "items: change or rebut each (1 round)" --> LP2["#2 Long-term planner: revision"]
+    LP2 --> GR{{"Gate: approve roadmap<br/>(benchmarks, quotes, critique + answers)"}}
     GR --> SP["#3 Short-term planner<br/>Claude Sonnet 5.5"]
     LP -- "minor change: no gate" --> SP
     LP -- "all milestones done" --> PK["#7 Packager<br/>package; paper on demand"]
@@ -16,9 +17,10 @@ flowchart TD
     SP -- "too big: split" --> LP
     CO -- "pass, or still failing<br/>(issues passed as notes)" --> MD["#4 Math designer<br/>Claude Opus 5.5"]
 
-    MD -- "MathSpec: formulation, algorithm,<br/>signatures, tolerances + stubs" --> OVD(["#8 Overseer: design"])
+    MD -- "draft: formulation, algorithm,<br/>signatures, tolerances + stubs" --> OVD(["#8 Overseer: critique"])
     MD -- "unusable twice" --> LP
-    OVD --> CD["#5 Coder<br/>GPT 6.1 Sol<br/>(benchmark refs, never values)"]
+    OVD -- "items: change or rebut each (1 round)" --> MD2["#4 Math designer: revision<br/>then stubs written"]
+    MD2 --> CD["#5 Coder<br/>GPT 6.1 Sol<br/>(benchmark refs, never values)"]
     CD -- code --> H["Stub check, no LLM<br/>stubs implemented, same signatures,<br/>package imports, reproduce script"]
     H -- "TestResult ≤3k" --> CD
     H -- "3 failed sessions" --> OVC(["#8 Overseer: stuck coder"]) --> GC{{"Gate: coder"}}

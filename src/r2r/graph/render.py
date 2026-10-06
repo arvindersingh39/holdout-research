@@ -164,3 +164,18 @@ def _verdict(c) -> str:
     if not c.checked:
         return "not checked (you judge)"
     return "pass" if c.passed else "FAIL"
+
+
+def render_review(title: str, critique, responses, failed: bool) -> str:
+    """D94: the overseer's critique items with the author's answers, for gates."""
+    if critique is None or not critique.items:
+        return ""
+    by_id = {r.id: r for r in responses or []}
+    lines = [f"**{title}** (overseer critique, answered by the author)"]
+    if failed:
+        lines.append("- ⚑ The revision failed; the original draft was kept unchanged.")
+    for item in critique.items:
+        r = by_id.get(item.id)
+        answer = f"{r.verdict}: {r.text}" if r else "no answer"
+        lines.append(f"- {item.id} ({item.severity}): {item.text}\n  → {answer}")
+    return "\n".join(lines)

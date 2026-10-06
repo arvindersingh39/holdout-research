@@ -1,7 +1,8 @@
 """Builds the graph (PLAN.md §2; D93 lean flow) and opens it with the SQLite checkpointer.
 
-retrieve → long_plan → (roadmap gate) → short_plan ⇄ coordinate → design → code ⇄ stub check →
-[benchmark gate → compare] → digest → result gate → long_plan (no model call when met).
+retrieve → long_plan [→ critique_plan → revise_plan] → (roadmap gate) → short_plan ⇄ coordinate →
+design [→ critique_design → finalize_design] → code ⇄ stub check → [benchmark gate → compare] →
+digest → result gate → long_plan (no model call when met). Brackets: D94 reflection, when on.
 """
 
 from __future__ import annotations
@@ -49,6 +50,10 @@ GUARDED = (
     "design",
     "code",
     "digest",
+    "critique_plan",
+    "revise_plan",
+    "critique_design",
+    "finalize_design",
     "publish",
     "oversee_plan",
     "oversee_design",
@@ -119,6 +124,8 @@ def _after_coordinate(state: PipelineState, max_rounds: int) -> str:
 
 
 def _after_design(state: PipelineState) -> str:
+    if state.get("design_review"):
+        return "critique_design"  # D94
     if state.get("design_ok"):
         return "code"
     return "long_plan" if state.get("human_note") else "design"
@@ -160,6 +167,10 @@ def build_graph(deps: RunDeps) -> StateGraph:
         "short_plan": nodes.short_plan,
         "coordinate": nodes.coordinate,
         "design": nodes.design,
+        "critique_design": nodes.critique_design,
+        "finalize_design": nodes.finalize_design,
+        "critique_plan": nodes.critique_plan,
+        "revise_plan": nodes.revise_plan,
         "code": nodes.code,
         "compare": nodes.compare,
         "digest": nodes.digest,
@@ -188,11 +199,15 @@ def build_graph(deps: RunDeps) -> StateGraph:
         edge(hook, lambda s, t=target: t, [target])
     g.add_edge(START, "retrieve")
     edge("retrieve", lambda s: "long_plan", ["long_plan"])
+    plan_route = _via_overseer(_after_long_plan, "long_plan", ov)
     edge(
         "long_plan",
-        _via_overseer(_after_long_plan, "long_plan", ov),
-        ["finish", "roadmap_gate", "short_plan", "oversee_plan"],
+        lambda s: "critique_plan" if s.get("plan_review") else plan_route(s),
+        ["finish", "roadmap_gate", "short_plan", "oversee_plan", "critique_plan"],
     )
+    edge("critique_plan", lambda s: "revise_plan", ["revise_plan"])
+    # the critique replaces the plan hook: no second overseer call before the gate
+    edge("revise_plan", _after_long_plan, ["finish", "roadmap_gate", "short_plan"])
     edge(
         "short_plan",
         lambda s: "long_plan" if s.get("split_request") else "coordinate",
@@ -206,8 +221,10 @@ def build_graph(deps: RunDeps) -> StateGraph:
     edge(
         "design",
         _via_overseer(_after_design, "design", ov),
-        ["code", "design", "long_plan", "oversee_design"],
+        ["code", "design", "long_plan", "oversee_design", "critique_design"],
     )
+    edge("critique_design", lambda s: "finalize_design", ["finalize_design"])
+    edge("finalize_design", _after_design, ["code", "design", "long_plan"])
     edge(
         "code",
         _via_overseer(partial(_after_code, max_sessions=b.coder_max_sessions), "code", ov),

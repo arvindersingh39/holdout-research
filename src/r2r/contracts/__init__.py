@@ -12,7 +12,17 @@ from r2r.contracts.base import (
 from r2r.contracts.common import BlobKind, BlobRef, Criterion, Failure, FileSpec, Hotspot, Issue
 from r2r.contracts.harness import OptimizationOutcome, OptimizationPatch, ProfileReport, TestResult
 from r2r.contracts.math import BenchSpec, ContractCheck, MathDesign, MathSpec, SanityCheck
-from r2r.contracts.oversight import Briefing, OversightFlag, OversightReport
+from r2r.contracts.oversight import (
+    Briefing,
+    Critique,
+    CritiqueItem,
+    CritiqueResponse,
+    DesignRevision,
+    OversightFlag,
+    OversightReport,
+    RoadmapRevision,
+    unanswered,
+)
 from r2r.contracts.planning import (
     BaselineCard,
     Benchmark,
@@ -48,6 +58,10 @@ __all__ = [
     "CoordinatorVerdict",
     "Criterion",
     "CriterionResult",
+    "Critique",
+    "CritiqueItem",
+    "CritiqueResponse",
+    "DesignRevision",
     "Failure",
     "FileSpec",
     "Hotspot",
@@ -71,6 +85,7 @@ __all__ = [
     "ResearchBrief",
     "ResultDigest",
     "Roadmap",
+    "RoadmapRevision",
     "Role",
     "SanityCheck",
     "TestResult",
@@ -78,4 +93,5 @@ __all__ = [
     "ensure_within_cap",
     "get_contract_caps",
     "set_contract_caps",
+    "unanswered",
 ]

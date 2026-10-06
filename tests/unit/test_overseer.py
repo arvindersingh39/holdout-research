@@ -161,3 +161,35 @@ def test_design_evidence_never_has_reference_values() -> None:
     )
     assert [e for e in ev if e.kind == "code_file" and "def f" in e.text]
     assert not [e for e in ev if e.kind in ("reference_data", "benchmark_comparison")]
+
+
+# --- D94: one critique the author must answer --------------------------------------------------
+
+
+def _critique(*items) -> str:
+    return json.dumps({"point": "design", "items": list(items)})
+
+
+def _ci(i, ev=("E1",), severity="high"):
+    return {"id": f"C{i}", "severity": severity, "text": f"change {i}", "evidence": list(ev)}
+
+
+def test_critique_keeps_cited_items_and_renumbers(ctx: CallContext, fake: FakeLLM) -> None:
+    from r2r.agents.overseer import run_critique
+
+    fake.script("overseer", _critique(_ci(1, ("E9",)), _ci(2), _ci(3, ("E2",), "warn")))
+    c = run_critique("design", "goal", "M1", E, ctx)
+    assert [(i.id, i.text) for i in c.items] == [("C1", "change 2"), ("C2", "change 3")]
+    assert c.point == "design" and c.created_by == "overseer"
+    assert fake.calls[0].role == "overseer" and "critique" in str(fake.calls[0].messages[0])
+
+
+def test_failed_critique_is_empty_and_budget_still_stops(ctx: CallContext, fake: FakeLLM) -> None:
+    from r2r.agents.overseer import run_critique
+
+    fake.script("overseer", "not json", "still not json", "nope")
+    assert run_critique("plan", "goal", None, E, ctx).items == []
+    s = ctx.settings
+    tiny = s.model_copy(update={"budgets": s.budgets.model_copy(update={"usd_cap_run": 1e-9})})
+    with pytest.raises(BudgetExceeded):
+        run_critique("plan", "goal", None, E, dataclasses.replace(ctx, settings=tiny))

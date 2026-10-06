@@ -123,6 +123,8 @@ class OverseerLimits(_Strict):
     flags_shown: PositiveInt  # newest flags shown at each gate
     flag_chars: PositiveInt  # a flag longer than this is shortened at gates (full text in `show`)
     evidence_chars: PositiveInt  # cap per evidence item the overseer reads
+    reflect_plan: bool = True  # D94: one critique + revision of each new roadmap
+    reflect_design: bool = True  # D94: one critique + revision of each design
 
 
 class ReferenceDataLimits(_Strict):

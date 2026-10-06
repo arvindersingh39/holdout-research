@@ -31,3 +31,47 @@ def test_finished_milestones_are_exempt(ctx: CallContext, fake: FakeLLM) -> None
     fake.script("long_planner", done_big)
     out = run_long_planner(research_brief(), done_big, None, None, [], ctx)
     assert len(out.milestones[0].acceptance_criteria) == 8 and len(fake.calls) == 1
+
+
+# --- D94: one revision answering the overseer's critique ----------------------------------------
+
+
+def _critique(*ids):
+    from r2r.contracts import Critique, CritiqueItem
+
+    return Critique(
+        created_by="overseer",
+        run_id="run-test",
+        point="plan",
+        items=[CritiqueItem(id=i, severity="high", text=f"fix {i}", evidence=["E1"]) for i in ids],
+    )
+
+
+def _revision(rm: Roadmap, *answers) -> str:
+    import json
+
+    data = rm.model_dump(exclude={"created_by", "run_id", "milestone_id"})
+    responses = [{"id": i, "verdict": v, "text": t} for i, v, t in answers]
+    return json.dumps({"roadmap": data, "responses": responses})
+
+
+def test_revision_answers_every_item_and_keeps_the_draft_version(
+    ctx: CallContext, fake: FakeLLM
+) -> None:
+    from r2r.agents.long_planner import revise_roadmap
+
+    draft = roadmap().model_copy(update={"version": 3})
+    revised = roadmap().model_copy(update={"goal": "Revised goal after the critique."})
+    fake.script(
+        "long_planner",
+        _revision(revised, ("C1", "changed", "split M1")),  # C2 unanswered: one repair
+        _revision(revised, ("C1", "changed", "split M1"), ("C2", "rebutted", "M2 is needed")),
+    )
+    out, responses = revise_roadmap(research_brief(), None, draft, _critique("C1", "C2"), ctx)
+    assert out.goal == "Revised goal after the critique." and out.version == 3
+    assert [(r.id, r.verdict) for r in responses] == [("C1", "changed"), ("C2", "rebutted")]
+    payload = str(fake.calls[0].messages[1]["content"])
+    assert "fix C1" in payload and "Price European options" in payload  # critique + draft
+    assert "answer every critique item" in str(fake.calls[1].messages) and "C2" in str(
+        fake.calls[1].messages[-1]
+    )

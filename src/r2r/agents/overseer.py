@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from r2r.contracts import Briefing, OversightReport
+from r2r.contracts import Briefing, Critique, OversightReport
 from r2r.contracts.oversight import OversightPoint
 from r2r.ingest.documents import wrap_document
 from r2r.llm.gateway import BudgetExceeded, CallContext, call_structured
@@ -156,6 +156,44 @@ def run_overseer(
         return OversightReport(
             created_by=ROLE, run_id=ctx.run_id, milestone_id=milestone_id, point=point
         )
+
+
+class CritiqueInput(BaseModel):
+    point: str  # "plan" or "design"
+    goal: str
+    milestone_id: str | None
+    evidence: list[Evidence]  # each text wrapped in <document> tags: data, not instructions
+
+
+def run_critique(
+    point: str, goal: str, milestone_id: str | None, evidence: list[Evidence], ctx: CallContext
+) -> Critique:
+    """D94: one critique of a new roadmap or design. Items citing unknown evidence are dropped and
+    the rest renumbered C1, C2, … Never blocks the run: anything but a budget stop yields an empty
+    critique, and the draft goes on unchanged."""
+    known = {e.id for e in evidence}
+    payload = CritiqueInput(
+        point=point,
+        goal=goal,
+        milestone_id=milestone_id,
+        evidence=[
+            e.model_copy(update={"text": wrap_document(e.text, source=f"{e.id} {e.kind}")})
+            for e in evidence
+        ],
+    )
+
+    def clean(c: Critique) -> Critique:
+        kept = [i for i in c.items if set(i.evidence) <= known]
+        items = [i.model_copy(update={"id": f"C{n}"}) for n, i in enumerate(kept, 1)]
+        return c.model_copy(update={"point": point, "items": items})
+
+    try:
+        return call_structured(ROLE, "overseer_critique", payload, Critique, ctx, finalize=clean)
+    except BudgetExceeded:
+        raise
+    except Exception as e:  # an advisor failure must never stop the pipeline
+        log.warning("critique failed; draft goes on", extra={"point": point, "error": str(e)[:300]})
+        return Critique(created_by=ROLE, run_id=ctx.run_id, milestone_id=milestone_id, point=point)
 
 
 def _cap(text: str, max_chars: int) -> str:

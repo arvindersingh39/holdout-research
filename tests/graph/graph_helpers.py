@@ -78,6 +78,7 @@ def make_deps(
     proposal: Path = PILOT,
     autopilot: bool = False,
     max_fix_rounds: int | None = None,
+    reflect: bool = False,
 ) -> RunDeps:
     """The overseer (Phase 7c) is off unless a test turns it on: it adds LLM calls to script."""
     settings = settings or load_settings(REPO / "tests" / "fixtures" / "config", env_file=None)
@@ -86,6 +87,8 @@ def make_deps(
         update={
             "enabled": overseer,
             "max_calls_milestone": overseer_max_calls or b.overseer.max_calls_milestone,
+            "reflect_plan": reflect,
+            "reflect_design": reflect,
         }
     )
     pub = b.publish.model_copy(update={"modes": list(publish_modes)})  # off unless a test asks

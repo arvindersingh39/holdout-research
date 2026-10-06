@@ -256,3 +256,40 @@ def test_file_spec_reference_purpose() -> None:
     from r2r.contracts import FileSpec
 
     assert FileSpec(path="src/pkg/core.py", purpose="reference", content="x").purpose == "reference"
+
+
+# --- D94: one-round reflection -----------------------------------------------------------------
+
+
+def _item(i: int, severity: str = "high") -> dict:
+    return {"id": f"C{i}", "severity": severity, "text": f"fix {i}", "evidence": ["E1"]}
+
+
+def test_critique_items_have_unique_ids_and_a_cap() -> None:
+    from r2r.contracts import Critique
+
+    meta = {"created_by": "overseer", "run_id": "r"}
+    c = Critique(**meta, point="plan", items=[_item(1), _item(2, "warn")])
+    assert [i.id for i in c.items] == ["C1", "C2"] and c.high() == ["C1"]
+    with pytest.raises(ValidationError, match="unique"):
+        Critique(**meta, point="plan", items=[_item(1), _item(1)])
+    with pytest.raises(ValidationError):
+        Critique(**meta, point="plan", items=[{**_item(1), "id": "X1"}])
+    with pytest.raises(ValidationError):
+        Critique(**meta, point="plan", items=[_item(i) for i in range(1, 12)])
+    with pytest.raises(ValidationError):
+        Critique(**meta, point="code", items=[])  # only the plan and the design are critiqued
+
+
+def test_revisions_answer_every_item() -> None:
+    from r2r.contracts import CritiqueResponse, RoadmapRevision, unanswered
+
+    r = RoadmapRevision(
+        created_by="long_planner",
+        run_id="r",
+        roadmap=roadmap(),
+        responses=[CritiqueResponse(id="C1", verdict="changed", text="M1 split in two")],
+    )
+    assert unanswered(r.responses, ["C1"]) == [] and unanswered(r.responses, ["C1", "C2"]) == ["C2"]
+    with pytest.raises(ValidationError):
+        CritiqueResponse(id="C1", verdict="ignored", text="x")
