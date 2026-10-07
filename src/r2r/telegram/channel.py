@@ -9,7 +9,8 @@ from collections.abc import Callable
 
 from r2r.contracts import HumanDecision
 from r2r.graph.gates import NOTE_CHARS, GateRequest
-from r2r.telegram.client import TelegramClient
+from r2r.log import get_logger
+from r2r.telegram.client import TelegramClient, TelegramError
 from r2r.whatsapp.messages import _plain
 
 TEXT_CHARS = 3500  # Telegram allows 4,096 per message; the full gate goes as a document
@@ -17,6 +18,8 @@ BUTTONS = [
     [("Approve", "approve"), ("Redirect", "redirect")],
     [("Stop", "stop"), ("Quit for now", "quit")],
 ]
+log = get_logger(__name__)
+
 PATH_ROW = [("Other path", "path")]  # D93: approve with a results file the owner names
 NOTE_PROMPT = {
     "redirect": "Reply with a one-line note for the long-term planner.",
@@ -59,9 +62,9 @@ class TelegramChannel:
                         continue
                     stamp, _, action = str(cq.get("data", "")).partition(":")
                     if stamp != nonce:
-                        self.client.answer_callback(cq["id"], "This gate is already closed.")
+                        self._answer(cq["id"], "This gate is already closed.")
                         continue
-                    self.client.answer_callback(cq["id"])
+                    self._answer(cq["id"])
                     if action == "approve":
                         self.client.clear_buttons(self.chat_id, message_id)
                         return _decision(run_id, "approve")
@@ -86,6 +89,14 @@ class TelegramChannel:
                 self.client.clear_buttons(self.chat_id, message_id)
                 action = "approve" if waiting_for == "path" else waiting_for
                 return _decision(run_id, action, "" if note == "-" else note)
+
+    def _answer(self, callback_id: str, text: str = "") -> None:
+        """Stop the pressed button spinning. Only cosmetic: Telegram rejects answers to presses
+        older than a few seconds (e.g. read on resume), which must not crash the gate."""
+        try:
+            self.client.answer_callback(callback_id, text)
+        except TelegramError as e:
+            log.warning("button press not acknowledged", extra={"error": str(e)[:200]})
 
 
 def _decision(run_id: str, action: str, note: str = "") -> HumanDecision:

@@ -21,10 +21,11 @@ Batch = Callable[["FakeTelegram"], list[dict]]
 class FakeTelegram:
     """Records every API call; each getUpdates returns the next scripted batch."""
 
-    def __init__(self, *batches: Batch) -> None:
+    def __init__(self, *batches: Batch, expired: tuple[str, ...] = ()) -> None:
         self.calls: list[tuple[str, dict]] = []
         self.batches = list(batches)
         self.next_id = 0
+        self.expired = expired  # callback ids Telegram no longer accepts answers for
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         assert request.url.path.startswith(f"/bot{TOKEN}/")
@@ -32,6 +33,15 @@ class FakeTelegram:
         ctype = request.headers.get("content-type", "")
         body = json.loads(request.content) if "json" in ctype else {"multipart": request.content}
         self.calls.append((method, body))
+        if method == "answerCallbackQuery" and body.get("callback_query_id") in self.expired:
+            return httpx.Response(
+                400,
+                json={
+                    "ok": False,
+                    "description": "Bad Request: query is too old and response timeout expired "
+                    "or query ID is invalid",
+                },
+            )
         if method == "getUpdates":
             result = self.batches.pop(0)(self) if self.batches else []
         elif method in ("sendMessage", "sendDocument"):
@@ -57,10 +67,10 @@ class FakeTelegram:
 _ids = iter(range(1, 10_000))
 
 
-def press(action: str, chat: str = CHAT, nonce: str | None = None) -> Batch:
+def press(action: str, chat: str = CHAT, nonce: str | None = None, cb: str = "cb") -> Batch:
     def make(t: FakeTelegram) -> list[dict]:
         data = f"{nonce or t.nonce()}:{action}"
-        cq = {"id": "cb", "data": data, "message": {"message_id": 1, "chat": {"id": int(chat)}}}
+        cq = {"id": cb, "data": data, "message": {"message_id": 1, "chat": {"id": int(chat)}}}
         return [{"update_id": next(_ids), "callback_query": cq}]
 
     return make
@@ -116,6 +126,18 @@ def test_other_chats_and_stale_buttons_are_ignored() -> None:
     )
     d = channel(fake).ask(REQ, "study-3")
     assert d is not None and d.action == "redirect" and d.note == "The real note."
+
+
+def test_an_expired_button_press_does_not_crash_the_gate() -> None:
+    """A press left from an older gate is answered too late on resume; Telegram rejects the
+    answer, but the press is only cosmetic, so the gate keeps waiting for a real decision."""
+    fake = FakeTelegram(
+        press("approve", nonce="deadbeef", cb="old"),
+        press("approve", cb="late"),
+        expired=("old", "late"),
+    )
+    d = channel(fake).ask(REQ, "study-4")
+    assert d is not None and d.action == "approve"
 
 
 def test_long_gate_is_cut_and_attached_whole() -> None:
