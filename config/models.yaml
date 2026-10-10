@@ -3,24 +3,27 @@
 # "local/<name>" models run on this machine with no API call.
 roles:
   retriever:     {model: openrouter/google/gemini-3.8-flash,       max_tokens: 4000}
-  long_planner:  {model: anthropic/claude-opus-5-5,                max_tokens: 3000,
+  long_planner:  {model: anthropic/claude-opus-5-5,       max_tokens: 30000,
                   thinking_budget: 4000}
-  short_planner: {model: anthropic/claude-sonnet-5-5,              max_tokens: 2500}
-  coordinator:   {model: openrouter/google/gemini-3.1-pro-preview, max_tokens: 800}
-  math_designer: {model: openrouter/google/gemini-3.1-pro-preview, max_tokens: 16000,
-                  thinking_budget: 4000}
-  coder:         {model: anthropic/claude-sonnet-5-5,              max_tokens: 8000,
-                  escalate_to: anthropic/claude-opus-5-5}  # 8000: D69
-  optimizer:     {model: openrouter/google/gemini-3.8-flash,       max_tokens: 4000,
-                  thinking_budget: 2000}
+  short_planner: {model: anthropic/claude-sonnet-5-5,              max_tokens: 8000}  # reverted (D72)
+  coordinator:   {model: openrouter/google/gemini-3.1-pro-preview, max_tokens: 800,
+                  thinking_budget: 1500}  # reverted (D72)
+  math_designer: {model: openrouter/openai/gpt-6.1-sol,              max_tokens: 20000,
+                  thinking_budget: 8000}  # Sonnet 5.5 with thinking: answers via the offered tool (D92)
+  coder:         {model: openrouter/openai/gpt-6.1-sol,              max_tokens: 30000}  # 8000: D69
   digest:        {model: openrouter/google/gemini-3.8-flash,       max_tokens: 300,
                   thinking_budget: 512}  # deviations note only
   writer:        {model: anthropic/claude-opus-5-5,                max_tokens: 6000}
-  scout:         {model: openrouter/google/gemini-3.8-flash,       max_tokens: 4000,
-                  thinking_budget: 1024}  # test baselines from the web (D55)
-  overseer:      {model: anthropic/claude-opus-5-5,                max_tokens: 2000,
+  overseer:      {model: openrouter/openai/gpt-6.1-sol,                max_tokens: 5000,
                   thinking_budget: 2000}  # briefings for the other agents (D62)
 embeddings:      {model: local/all-MiniLM-L6-v2}   # Chroma's built-in ONNX model; no API, no torch
 cache_prefix: true                # prompt caching on system prompt + output schema
-price_overrides: {}               # USD per million tokens, if LiteLLM's price map is stale
+price_overrides:                  # USD per million tokens (OpenRouter list prices, 2026-10-02)
+  openrouter/openai/gpt-6.1-sol:              {input_per_mtok: 2.00, output_per_mtok: 10.00}
+  openrouter/deepseek/deepseek-v4-pro-0813:   {input_per_mtok: 0.66, output_per_mtok: 1.98}
+  openrouter/deepseek/deepseek-v4.1-flash:    {input_per_mtok: 0.02, output_per_mtok: 0.60}
+  # D111: LiteLLM's remote price map dropped these OpenRouter entries on 2026-10-10 (price 0 =
+  # unknown); Google list prices from LiteLLM's gemini/ entries (Pro: <= 200k-token prompts).
+  openrouter/google/gemini-3.1-pro-preview:   {input_per_mtok: 2.00, output_per_mtok: 12.00}
+  openrouter/google/gemini-3.8-flash:         {input_per_mtok: 0.75, output_per_mtok: 3.75}
                                   # (Gemini Flash introductory pricing ends 2026-12-31)

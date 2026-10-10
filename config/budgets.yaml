@@ -1,43 +1,45 @@
-usd_cap_run: 20.0
-usd_cap_milestone: 3.0
-coordinator_max_revise_rounds: 2
+usd_cap_run: 70.0
+usd_cap_milestone: 10.0
+coordinator_max_revise_rounds: 1
+structured_attempts: 3           # answer + repair attempts per structured LLM call
+max_criteria_per_milestone: 5    # bigger unfinished milestones are sent back to be split
 coder_max_turns: 25
-coder_escalate_after: 2          # failed sessions before switching to escalate_to
-coder_max_sessions: 3            # then a human gate
-optimizer_max_attempts: 4
-optimizer_min_gain: 0.05         # 5% runtime improvement
-optimizer_patience: 2            # consecutive attempts below min_gain, then stop
-optimizer_target_runtime_s: null # set per milestone by MathSpec.bench when known
-bench_repeats: 5                 # rerun with 9 if coefficient of variation > 10%
-sandbox: {cpus: 2, memory: 2g, pids: 256, test_timeout_s: 300, bench_timeout_s: 600}
+coder_escalate_after: 0          # failed sessions before switching to escalate_to
+coder_max_sessions: 2            # then a human gate
+sandbox: {cpus: 2, memory: 2g, pids: 256, test_timeout_s: 3000, bench_timeout_s: 6000}
 ingest:
   chunk_tokens: 800
   chunk_overlap_tokens: 100
   paper_card_input_tokens: 12000   # how much of each paper the retriever reads
 context_pack_tokens: {short_planner: 1500, math_designer: 2500, writer_section: 2000}
-context_pack: {k: 8, max_refs: 5, ref_summary_chars: 100}   # chunks retrieved; refs kept in a spec
-baselines:                        # published reference values for tests, via Tavily (D52)
-  enabled: true                   # false for sensitive projects: queries reveal the topic
-  max_queries: 4                  # per milestone
-  max_pages: 6                    # pages extracted per milestone
-  page_tokens: 4000               # cap per page read by the scout
+context_pack: {k: 8, max_refs: 5, ref_summary_chars: 100, full_proposal_tokens: 4000}   # chunks retrieved; refs kept in a spec
 overseer:                         # advisor: evidence-cited briefings, never routes (D62-D64)
   enabled: true
-  max_calls_milestone: 6          # hooks: plan, spec, rejected design, design gate, failed session, result
+  max_calls_milestone: 6          # hooks: plan, design, stuck coder, result (D93)
   briefing_tokens: 400            # cap per briefing
   max_briefings: 4                # per report
   flags_shown: 6                  # newest flags shown at each gate
+  flag_chars: 280                 # longer flags are shortened at gates (full text: r2r show)
   evidence_chars: 3000            # cap per evidence item (test file, failure, spec) it reads
+  reflect_plan: true              # D94: overseer critiques each new roadmap; the planner revises once
+  reflect_design: true            # D94: overseer critiques each design; the designer revises once
 publish:                          # Phase 8 (D67)
-  modes: [paper, package]
+  modes: [package]                # D86: paper on demand: r2r publish <run> --mode paper
   fix_attempts: 1                 # writer fixes after a failed LaTeX compile
   log_tail_lines: 40              # compile-log lines sent back to the writer
   compile_timeout_s: 240
+reference_data:                   # owner's recorded values, benchmarks (D71, D93)
+  dir: data                       # folder next to proposal.md; json/csv/tsv/txt/md only
+  max_file_kb: 256
+autopilot:                        # plain-Python decisions at routine gates (D76)
+  enabled: false                  # or per run: r2r run/resume --autopilot
+  roadmap_first: human            # human | auto
+  publication: human              # human | auto
+  max_fix_rounds: 2               # benchmark mismatches sent back to the coder (D93)
 gates:
-  channel: cli                       # cli | whatsapp (D2); terminal for now (D49)
+  channel: telegram                       # cli | whatsapp (D2); terminal for now (D49)
   approve_first_roadmap: true
   roadmap_changes: material_only     # milestones added/removed/reordered or goal changed
-  review_tests: first_milestone      # always | first_milestone | never
   remind_after_h: 24                 # re-ping while a gate waits (a template if the window is closed)
   max_reminders: 3
   full_text: attach                  # attach the full contract as a document | summary_only
@@ -46,13 +48,14 @@ gates:
     template_lang: en_US
     batch_pending_gates: true        # one ping covers every waiting gate
 contract_token_caps:
-  ResearchBrief: 3000
-  Roadmap: 2000
-  MilestoneSpec: 1500
-  MathSpec: 2500
-  CoordinatorVerdict: 300
-  TestResult: 1500
+  ResearchBrief: 4000
+  Roadmap: 20000
+  MilestoneSpec: 8000
+  MathSpec: 20000
+  CoordinatorVerdict: 2000
+  TestResult: 3000
   ProfileReport: 1000
-  ResultDigest: 800
+  ResultDigest: 1800
   OversightReport: 2000
   PaperSection: 4000
+  VerificationReport: 2500
