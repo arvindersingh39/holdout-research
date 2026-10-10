@@ -31,7 +31,8 @@ roadmap. Return the complete, rewritten roadmap.
   modest budget, and each numerical criterion states its inputs, quantity and tolerance. The
   owner judges criteria at the result gate. Prefer 3–6 milestones for a typical project.
 - Every acceptance criterion is objectively checkable (thresholds, tolerances, units, seeds)
-  and has an id `AC1`, `AC2`, … unique within its milestone. Milestone ids are `M1`, `M2`, …
+  and has an id `AC1`, `AC2`, … unique within its milestone. Keep each criterion's text under
+  about 400 characters. Milestone ids are `M1`, `M2`, …
 - Keep milestone ids stable across cycles. Do not renumber, reorder or remove milestones
   unless the evidence or the human note requires it; such changes go back to the human.
 - `depends_on` lists only earlier milestones that truly must be finished first.

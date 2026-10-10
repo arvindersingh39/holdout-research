@@ -111,7 +111,7 @@ class MathSpec(Contract):
     milestone_scoped = True
 
     formulation: Text(4000, 1)  # LaTeX
-    algorithm: Text(3000, 1)
+    algorithm: Text(6000, 1)
     signatures: Annotated[list[Text(400, 1)], Field(min_length=1, max_length=20)]
     tolerances: dict[Text(120, 1), float] = {}
     bench: BenchSpec | None = None

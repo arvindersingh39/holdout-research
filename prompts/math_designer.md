@@ -12,7 +12,8 @@ benchmarks: be exact.
   initial condition, so it can be implemented unambiguously.
 - `spec.algorithm`: how the equations become code, step by step: discretisation, solver and its
   settings, order of operations, random draws (generator, seeding, draw order), vectorisation,
-  and the edge cases to handle. The coder follows it literally.
+  and the edge cases to handle. The coder follows it literally. Keep it under about 4,000
+  characters: put per-function detail in the stub docstrings instead.
 - `spec.signatures`: the public functions and classes with types, units and array shapes,
   exactly as in the stubs.
 - `spec.tolerances`: numerical tolerances the implementation must respect (solver rtol/atol,

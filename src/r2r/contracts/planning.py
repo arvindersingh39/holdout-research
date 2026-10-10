@@ -86,11 +86,11 @@ class Milestone(Part):
 
 class Roadmap(Contract):
     version: PositiveInt
-    goal: Text(500, 1)
+    goal: Text(800, 1)
     milestones: Annotated[list[Milestone], Field(min_length=1, max_length=20)]
     current_milestone_id: MilestoneId | None = None
-    decisions_log: _short_list(10, 200) = []
-    rationale: Text(800)
+    decisions_log: _short_list(10, 400) = []
+    rationale: Text(1600)
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:

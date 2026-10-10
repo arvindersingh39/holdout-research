@@ -14,7 +14,7 @@ coder implements them. No tests check the result, so ambiguity here becomes wron
   writes. Make sure the tasks and interfaces can compute each of them; never state their values.
 - Cover every acceptance criterion of the milestone. Copy each criterion (same id) into
   `acceptance_criteria`, tightened if needed but never weakened.
-- Field limits, in characters: each criterion's `text` ≤ 300, each task ≤ 800, each interface
+- Field limits, in characters: each criterion's `text` ≤ 400, each task ≤ 800, each interface
   ≤ 400, each risk ≤ 300, `rationale` ≤ 600. Tightening a criterion makes it more precise, not longer:
   keep it one sentence and put file names, field paths and step details in `tasks`.
 - `tasks`: concrete steps a competent engineer could follow without guessing.

@@ -75,12 +75,12 @@ def test_blob_ref_rules() -> None:
 def test_string_limits() -> None:
     with pytest.raises(ValidationError):
         roadmap().model_copy(update={}).model_validate(
-            {**roadmap().model_dump(), "rationale": "x" * 801}
+            {**roadmap().model_dump(), "rationale": "x" * 1601}
         )
     with pytest.raises(ValidationError):
         Roadmap.model_validate({**roadmap().model_dump(), "decisions_log": ["d"] * 11})
     with pytest.raises(ValidationError):
-        Roadmap.model_validate({**roadmap().model_dump(), "decisions_log": ["x" * 201]})
+        Roadmap.model_validate({**roadmap().model_dump(), "decisions_log": ["x" * 401]})
     with pytest.raises(ValidationError):
         MilestoneSpec.model_validate({**milestone_spec().model_dump(), "rationale": "x" * 601})
     with pytest.raises(ValidationError):

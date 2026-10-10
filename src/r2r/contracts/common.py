@@ -45,7 +45,7 @@ class BlobRef(Part):
 
 class Criterion(Part):
     id: CriterionId
-    text: Text(300, 1)
+    text: Text(600, 1)
 
 
 class Issue(Part):
