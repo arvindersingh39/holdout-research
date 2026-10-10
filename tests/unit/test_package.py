@@ -81,6 +81,26 @@ def test_assemble_package(ws: Workspace, tmp_path: Path) -> None:
     assert "import ising" in (pkg / ".github/workflows/tests.yml").read_text()
 
 
+def test_package_is_named_after_the_main_package(ws: Workspace, tmp_path: Path) -> None:
+    # study-4: a small helper package that sorts first ("baselines") named the whole wheel
+    (ws.root / "src/aaa_helpers").mkdir()
+    (ws.root / "src/aaa_helpers/__init__.py").write_text('"""Small helpers."""\n')
+    pkg = assemble_package(_record(), ws, tmp_path / "publish")
+    meta = tomllib.loads((pkg / "pyproject.toml").read_text())
+    assert meta["project"]["name"] == "ising"
+    wheel_pkgs = meta["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
+    assert set(wheel_pkgs) == {"src/ising", "src/aaa_helpers"}  # every package still ships
+    readme = (pkg / "README.md").read_text()
+    assert "import ising" in readme and "import aaa_helpers" not in readme
+
+
+def test_readme_lists_the_code_not_stale_design_signatures(ws: Workspace, tmp_path: Path) -> None:
+    pkg = assemble_package(_record(), ws, tmp_path / "publish")
+    readme = (pkg / "README.md").read_text()
+    assert "bs_call" not in readme  # in the design's signatures, never in the final code
+    assert "`ising.core`: Ising helpers." in readme  # modules come from the code itself
+
+
 def test_build_wheel_command(tmp_path: Path) -> None:
     calls = []
 

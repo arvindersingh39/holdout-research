@@ -54,6 +54,39 @@ def packages(src: Path) -> list[str]:
     return sorted(p.name for p in src.iterdir() if (p / "__init__.py").is_file())
 
 
+def main_first(src: Path, names: list[str]) -> list[str]:
+    """The package with the most source lines names the project; ties go alphabetically.
+
+    study-4: a small helper package ("baselines") sorted first and named the whole wheel.
+    """
+
+    def lines(name: str) -> int:
+        return sum(
+            len(p.read_text(errors="ignore").splitlines()) for p in (src / name).rglob("*.py")
+        )
+
+    main = max(names, key=lines)  # max keeps the first of equals: alphabetical
+    return [main, *(n for n in names if n != main)]
+
+
+def modules(src: Path, name: str) -> list[str]:
+    """Public modules of package `name` from the code, each with its docstring's first line."""
+    out = []
+    for path in sorted((src / name).rglob("*.py")):
+        parts = path.relative_to(src).with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if any(part.startswith("_") for part in parts):
+            continue
+        try:
+            doc = ast.get_docstring(ast.parse(path.read_text(errors="ignore"))) or ""
+        except SyntaxError:
+            doc = ""
+        first = doc.strip().splitlines()[0] if doc.strip() else ""
+        out.append(f"- `{'.'.join(parts)}`" + (f": {first}" if first else ""))
+    return out
+
+
 def assemble_package(record: RunRecord, ws: Workspace, out_dir: Path) -> Path:
     pkg_dir = out_dir / "package"
     shutil.rmtree(pkg_dir, ignore_errors=True)
@@ -63,11 +96,14 @@ def assemble_package(record: RunRecord, ws: Workspace, out_dir: Path) -> Path:
     names = packages(pkg_dir / "src")
     if not names:
         raise ValueError("no Python package under src/")
+    names = main_first(pkg_dir / "src", names)
     title = record.title or record.roadmap.goal
     (pkg_dir / "pyproject.toml").write_text(
         _pyproject(names, title, _dependencies(pkg_dir / "src"))
     )
-    (pkg_dir / "README.md").write_text(_readme(record, names[0], title))
+    (pkg_dir / "README.md").write_text(
+        _readme(record, names[0], title, modules(pkg_dir / "src", names[0]))
+    )
     (pkg_dir / "API.md").write_text(api_docs(pkg_dir / "src"))
     wf = pkg_dir / ".github" / "workflows"
     wf.mkdir(parents=True)
@@ -205,7 +241,7 @@ def _pyproject(names: list[str], title: str, deps: list[str]) -> str:
     )
 
 
-def _readme(record: RunRecord, name: str, title: str) -> str:
+def _readme(record: RunRecord, name: str, title: str, mods: list[str]) -> str:
     rows = [
         f"| {m.milestone.id} | {m.milestone.title} | {m.digest.status} | "
         f"{sum(c.passed for c in m.digest.criteria)}/{len(m.digest.criteria)} | "
@@ -213,7 +249,6 @@ def _readme(record: RunRecord, name: str, title: str) -> str:
         + " |"
         for m in record.milestones
     ]
-    sigs = [f"- `{s}`" for m in record.milestones if m.math_spec for s in m.math_spec.signatures]
     partial = "\n> Partial: not every planned milestone is complete.\n" if record.partial else ""
     return "\n".join(
         [
@@ -231,7 +266,9 @@ def _readme(record: RunRecord, name: str, title: str) -> str:
             "",
             f"```python\nimport {name}\n```",
             "",
-            *sigs,
+            "Modules:",
+            "",
+            *mods,
             "",
             "See [API.md](API.md) for every public function.",
             "",
