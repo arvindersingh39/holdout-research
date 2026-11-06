@@ -30,8 +30,25 @@ def project_settings() -> Settings:
     return load_settings(root / "config", root / ".env")
 
 
+def missing_keys(settings: Settings) -> list[str]:
+    """The API keys the configured models need that `.env` doesn't have."""
+    models = [r.model for r in settings.models.roles.values()]
+    models += [r.escalate_to for r in settings.models.roles.values() if r.escalate_to]
+    missing = set()
+    for provider in {m.split("/")[0] for m in models}:
+        field = f"{provider}_api_key"
+        key = getattr(settings.secrets, field, None)
+        if field in type(settings.secrets).model_fields and not (key and key.get_secret_value()):
+            missing.add(field.upper())
+    return sorted(missing)
+
+
 def make_client(settings: Settings) -> LLMClient:
     """The real LLM client. Tests replace this with FakeLLM."""
+    if missing := missing_keys(settings):
+        console.print(f"[red]Missing in .env: {', '.join(missing)}[/]")
+        console.print("Add them, then check with: uv run python scripts/check_models.py")
+        raise typer.Exit(2)
     return LiteLLMClient(settings.secrets)
 
 
@@ -124,6 +141,7 @@ def _deps(
     runs_base: Path | None,
     proposal: Path | None = None,
     export_dir: Path | None = None,
+    read_only: bool = False,  # status, show and costs make no LLM calls, so need no keys
 ):
     from r2r.graph.deps import RunDeps
     from r2r.log import configure_logging
@@ -132,12 +150,13 @@ def _deps(
     settings = project_settings()
     configure_logging("WARNING", settings.secrets)
     base = runs_base or root
+    client = LiteLLMClient(settings.secrets) if read_only else make_client(settings)
     if proposal is not None:
         return RunDeps.create(
             run_id,
             proposal,
             settings,
-            make_client(settings),
+            client,
             base,
             root / "prompts",
             sandbox_factory=make_sandbox_factory(),
@@ -147,7 +166,7 @@ def _deps(
         return RunDeps.load(
             run_id,
             settings,
-            make_client(settings),
+            client,
             base,
             root / "prompts",
             sandbox_factory=make_sandbox_factory(),
@@ -341,7 +360,7 @@ def status(run_id: str, runs_base: RunsBase = None) -> None:
     from r2r.graph.driver import config, open_graph, pending_gate
     from r2r.graph.routing import next_milestone
 
-    deps = _deps(run_id, runs_base)
+    deps = _deps(run_id, runs_base, read_only=True)
     with open_graph(deps) as graph:
         snap = graph.get_state(config(run_id))
         gate = pending_gate(graph, run_id)
@@ -377,7 +396,7 @@ def show(
     if contract not in SHOWABLE:
         console.print(f"[red]Choose one of: {', '.join(SHOWABLE)}[/]")
         raise typer.Exit(2)
-    deps = _deps(run_id, runs_base)
+    deps = _deps(run_id, runs_base, read_only=True)
     if contract == "decisions":  # Phase 7d: what autopilot decided, and why
         log_file = deps.paths.root / "decisions.jsonl"
         if not log_file.is_file():
@@ -449,7 +468,7 @@ def costs(run_id: str, runs_base: RunsBase = None) -> None:
     """Spend by role, model and milestone, with cache-read share."""
     from rich.table import Table
 
-    deps = _deps(run_id, runs_base)
+    deps = _deps(run_id, runs_base, read_only=True)
     led = deps.ledger
 
     def table(title: str, groups: dict) -> Table:
