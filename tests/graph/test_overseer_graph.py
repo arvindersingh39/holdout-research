@@ -159,7 +159,7 @@ def test_overseer_budget_exceeded_goes_to_budget_gate(
 
 
 def test_roadmap_redirect_clears_flags_on_the_old_roadmap(tmp_path: Path, fake: FakeLLM) -> None:
-    """study-3 extension: a flag on roadmap v30 was still shown at the v31 gate after it was fixed."""
+    """study-3 extension: a flag on roadmap v30 was still shown at the v31 gate once fixed."""
     fake.script("long_planner", ROADMAP, ROADMAP)
     fake.script(
         "overseer",

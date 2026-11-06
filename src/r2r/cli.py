@@ -140,6 +140,7 @@ def _deps(
             make_client(settings),
             base,
             root / "prompts",
+            sandbox_factory=make_sandbox_factory(),
             export_dir=export_dir,
         )
     try:
