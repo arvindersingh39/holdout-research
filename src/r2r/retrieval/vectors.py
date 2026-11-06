@@ -36,11 +36,15 @@ class VectorIndex:
         )
 
     def add(self, refs: list[BlobRef], texts: list[str]) -> None:
-        """Index chunks by blob id; re-adding the same blob is a no-op."""
+        """Index chunks by blob id; re-adding the same blob is a no-op, also within one call
+        (a paper can repeat a chunk verbatim, and blob ids are content hashes)."""
         if len(refs) != len(texts):
             raise ValueError("refs and texts must have the same length")
-        existing = set(self._col.get(ids=[r.blob_id for r in refs])["ids"]) if refs else set()
-        new = [(r, t) for r, t in zip(refs, texts, strict=True) if r.blob_id not in existing]
+        unique: dict[str, tuple[BlobRef, str]] = {}
+        for r, t in zip(refs, texts, strict=True):
+            unique.setdefault(r.blob_id, (r, t))
+        existing = set(self._col.get(ids=list(unique))["ids"]) if unique else set()
+        new = [(r, t) for r, t in unique.values() if r.blob_id not in existing]
         if not new:
             return
         self._col.add(

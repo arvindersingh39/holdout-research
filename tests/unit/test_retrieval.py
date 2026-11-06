@@ -49,6 +49,14 @@ def test_add_is_idempotent_and_persistent(tmp_path: Path, ctx: CallContext) -> N
     assert VectorIndex(tmp_path / "vectors", ctx).count() == len(TEXTS)
 
 
+def test_add_tolerates_repeated_chunks_in_one_call(tmp_path: Path, ctx: CallContext) -> None:
+    # A paper can repeat a chunk verbatim (e.g. a table fragment); blob ids are content hashes.
+    texts = [TEXTS[0], TEXTS[1], TEXTS[0], TEXTS[0]]
+    index, _, refs = _store(tmp_path, ctx, texts)
+    assert refs[0].blob_id == refs[2].blob_id
+    assert index.count() == 2
+
+
 def test_empty_index(tmp_path: Path, ctx: CallContext) -> None:
     index = VectorIndex(tmp_path / "vectors", ctx)
     assert index.query("anything", k=3) == []
