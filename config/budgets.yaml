@@ -1,5 +1,5 @@
-usd_cap_run: 70.0
-usd_cap_milestone: 10.0
+usd_cap_run: 20.0              # stops and asks before spending more
+usd_cap_milestone: 3.0
 coordinator_max_revise_rounds: 1
 structured_attempts: 3           # answer + repair attempts per structured LLM call
 max_criteria_per_milestone: 5    # bigger unfinished milestones are sent back to be split
@@ -37,7 +37,7 @@ autopilot:                        # plain-Python decisions at routine gates (D76
   publication: human              # human | auto
   max_fix_rounds: 2               # benchmark mismatches sent back to the coder (D93)
 gates:
-  channel: telegram                       # cli | whatsapp (D2); terminal for now (D49)
+  channel: cli                       # cli | telegram | whatsapp
   approve_first_roadmap: true
   roadmap_changes: material_only     # milestones added/removed/reordered or goal changed
   remind_after_h: 24                 # re-ping while a gate waits (a template if the window is closed)
