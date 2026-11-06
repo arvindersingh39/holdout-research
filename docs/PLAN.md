@@ -1,8 +1,11 @@
 # r2r — implementation plan for Claude Code
 
-> Read `docs/PROGRESS.md` first, then only the section for the current phase.
+> **Historical document.** This is the original plan the project was built from. The network
+> has changed since then (see `docs/architecture.md`, `docs/design-history.md` and
+> `docs/DECISIONS.md`), and later decisions override it.
+>
 > Phases run in order. ⛔ marks a checkpoint: stop, report and wait for the owner (§9).
-> Every default in this plan stands until the owner overrides it in the PROGRESS.md Decisions log.
+> Every default in this plan stands until the owner overrides it in the DECISIONS.md Decisions log.
 
 ## 1. Goal
 
@@ -92,7 +95,7 @@ r2r/
 │   ├── budgets.yaml       # spend caps, loop limits, gates, contract caps
 │   └── rubric.yaml        # coordinator criteria
 ├── prompts/               # one system prompt per role; stable content first (cacheable)
-├── docs/                  # PLAN.md, PROGRESS.md, architecture.md
+├── docs/                  # PLAN.md, DECISIONS.md, architecture.md
 ├── sandbox/Dockerfile
 ├── scripts/check_models.py
 ├── src/r2r/
@@ -282,14 +285,14 @@ All contracts live in `src/r2r/contracts/`. A shared base class adds `created_by
 - `src/r2r/settings.py`: loads `.env` and the YAML files into a validated `Settings` model.
 - `scripts/check_models.py`: one minimal request per role through LiteLLM directly (the gateway doesn't exist yet). Print the model ID, OK or the error, and LiteLLM's price entry. Expected cost: well under $0.01.
 - `examples/pilot_mc_pricer/proposal.md` with the text in §10.
-- Docker check (D3): run `docker version` and `docker run --rm hello-world`, and record the result in PROGRESS.md. If either fails, stop and ask the owner whether to install Docker or switch to the E2B backend.
-- Check the current APIs of LangGraph (interrupt and resume, SQLite checkpointer), LiteLLM (structured output per provider) and the docker SDK (run options). Record findings under "API notes" in PROGRESS.md.
+- Docker check (D3): run `docker version` and `docker run --rm hello-world`, and record the result in DECISIONS.md. If either fails, stop and ask the owner whether to install Docker or switch to the E2B backend.
+- Check the current APIs of LangGraph (interrupt and resume, SQLite checkpointer), LiteLLM (structured output per provider) and the docker SDK (run options). Record findings under "API notes" in DECISIONS.md.
 
 **Tests.** Settings load valid YAML and reject bad YAML; the package imports.
 
 **Done when.** Tests are green, `check_models.py` reports OK for every configured role, and the Docker check result is recorded.
 
-**⛔ Checkpoint 0.** Ask for every decision in §8 that PROGRESS.md doesn't yet confirm. The owner fills in `.env`; you run `check_models.py` and show the output. Remind the owner that the WhatsApp setup in §13 can start now, since template approval can take up to a day.
+**⛔ Checkpoint 0.** Ask for every decision in §8 that DECISIONS.md doesn't yet confirm. The owner fills in `.env`; you run `check_models.py` and show the output. Remind the owner that the WhatsApp setup in §13 can start now, since template approval can take up to a day.
 
 ### Phase 1 — Contracts, blob store, LLM gateway, ledger (M)
 
@@ -468,7 +471,7 @@ All contracts live in `src/r2r/contracts/`. A shared base class adds `created_by
   - Redirect: after the tap, the bot asks for the note; the owner's next text message (or a reply to the gate message) becomes `HumanDecision.note`.
   - Reminders every `remind_after_h` hours, at most `max_reminders`. A waiting run costs nothing; if the laptop was asleep, the bot re-pings when it comes back.
   - Scope: notifications and structured decisions only. The bot never relays open-ended chat to the LLM agents, because Meta's business terms bar general-purpose AI assistants on the platform. Unofficial WhatsApp Web libraries are not allowed.
-  - Before coding, check Meta's current docs for supported document types, interactive-message limits, template button format and webhook payload shapes; record findings under API notes in PROGRESS.md.
+  - Before coding, check Meta's current docs for supported document types, interactive-message limits, template button format and webhook payload shapes; record findings under API notes in DECISIONS.md.
 - Every node asserts that its output contract is within cap, so the roadmap and digest stay small across cycles.
 
 **Tests.** A two-milestone end-to-end run with `FakeLLM`; a budget breach routes to a gate; the roadmap stays at or under 2k tokens after 5 synthetic cycles; a crash between nodes followed by resume. WhatsApp channel against a fake Graph API and signed fake webhooks: a bad signature is rejected; non-owner messages are ignored; a duplicate delivery is processed once; the open-window path sends the interactive gate; the closed-window path sends the template, then the gate after "Show gate"; a reused nonce is ignored; Redirect captures the next message as the note.
@@ -532,7 +535,7 @@ expected value in the roadmap, a reference bug read as a test bug, a weakened sp
 
 ## 8. Decisions
 
-Defaults hold until the owner confirms or changes them in PROGRESS.md.
+Defaults hold until the owner confirms or changes them in DECISIONS.md.
 
 | ID | Decision | Default | Asked at |
 |---|---|---|---|
@@ -557,7 +560,7 @@ At every ⛔, and whenever an ask-first trigger in CLAUDE.md fires:
    - how to try it, with exact commands
    - what to review, as file paths or `r2r show` commands
    - open questions, each with your recommended answer
-3. Append the questions to "Open questions" in PROGRESS.md.
+3. Append the questions to "Open questions" in DECISIONS.md.
 4. Wait. Record the owner's answers in the Decisions log before continuing.
 
 ## 10. End-to-end acceptance test
