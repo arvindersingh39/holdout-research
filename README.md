@@ -49,22 +49,32 @@ Setup has been tested on macOS (Apple Silicon) and, for the offline tests, on Li
 ## How it works
 
 ```mermaid
-flowchart TD
-  P["Proposal, papers, your data"] --> R["Retriever: extract benchmarks"]
-  R --> LP["Long-term planner: roadmap"]
-  LP --> O1(["Overseer: critique"])
-  O1 --> G1{{"You: approve roadmap"}}
-  G1 --> SP["Short-term planner: milestone spec"]
-  SP --> CO["Coordinator: rubric check"]
-  CO --> MD["Math designer: formulation and stubs"]
-  MD --> O2(["Overseer: critique"])
-  O2 --> C["Coder, in the sandbox"]
-  C --> S["Stub check: no LLM"]
-  S --> G2{{"You: run the reproduce script"}}
-  G2 --> CMP["Compare with hidden values: no LLM"]
-  CMP --> G3{{"You: approve, edit, redirect or stop"}}
-  G3 -->|next milestone| SP
-  G3 -->|all done| PK["Packager: package, paper on demand"]
+%%{init: {"flowchart": {"htmlLabels": false}}}%%
+flowchart LR
+  subgraph PLAN["1. Plan the work"]
+    direction TB
+    P["Proposal, papers<br/>and your data"] --> R["Retriever"]
+    R --> LP["Long-term planner"]
+    LP --> O1(["Overseer critique"])
+    O1 --> G1{{"You approve"}}
+  end
+  subgraph BUILD["2. Build a milestone"]
+    direction TB
+    SP["Short-term planner"] --> CO["Coordinator"]
+    CO --> MD["Math designer"]
+    MD --> O2(["Overseer critique"])
+    O2 --> C["Coder in sandbox"]
+  end
+  subgraph CHECK["3. Check the results"]
+    direction TB
+    S["Stub check<br/>(no LLM)"] --> G2{{"You run the code"}}
+    G2 --> CMP["Compare with hidden<br/>values (no LLM)"]
+    CMP --> G3{{"You decide"}}
+  end
+  PLAN --> BUILD
+  BUILD --> CHECK
+  CHECK -->|next milestone| BUILD
+  CHECK -->|all done| PK["Package,<br/>paper on demand"]
 ```
 
 The [full network](docs/images/network_current.png) also shows the retry paths. See
