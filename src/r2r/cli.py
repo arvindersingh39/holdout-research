@@ -14,7 +14,7 @@ from r2r import __version__
 from r2r.llm.client import LiteLLMClient, LLMClient
 from r2r.settings import Settings, load_settings
 
-app = typer.Typer(no_args_is_help=True, help="r2r: research proposal to publish-ready results.")
+app = typer.Typer(no_args_is_help=True, help="Holdout: research proposal to publish-ready results.")
 console = Console()
 
 

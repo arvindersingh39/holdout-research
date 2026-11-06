@@ -1,6 +1,6 @@
 # Design decisions
 
-Decisions made while building r2r, kept because they explain why the code looks as it does.
+Decisions made while building Holdout (then called `r2r`), kept because they explain why the code looks as it does.
 Code comments refer to these IDs. Gaps in the numbering are decisions specific to private
 research runs, which are left out. `study-N` is an internal simulation study used as a test bed.
 

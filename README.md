@@ -1,13 +1,16 @@
-# r2r: research-to-results
+# Holdout
 
-[![CI](https://github.com/arvindersingh39/research-to-results/actions/workflows/ci.yml/badge.svg)](https://github.com/arvindersingh39/research-to-results/actions/workflows/ci.yml)
+[![CI](https://github.com/arvindersingh39/holdout-research/actions/workflows/ci.yml/badge.svg)](https://github.com/arvindersingh39/holdout-research/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 **Turn a research proposal into a tested Python package, and a LaTeX paper on request, with a
 team of LLM agents. Plain code and a human keep control of the decisions.**
 
-You write a proposal in Markdown and add any papers or reference data. r2r plans the work as
+The name comes from holdout data in machine learning, which is kept hidden so a model can be
+tested fairly. Here, the benchmark values are held out from the coding agent.
+
+You write a proposal in Markdown and add any papers or reference data. Holdout plans the work as
 milestones, implements each one in an isolated sandbox, and stops at gates for your approval.
 When a proposal or your data contains numbers the work should reproduce, the coding agent never
 sees them: you run the code, and plain Python compares the results with the hidden values.
@@ -18,8 +21,8 @@ You need [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 for you) and,
 [Docker](https://www.docker.com/).
 
 ```bash
-git clone https://github.com/arvindersingh39/research-to-results.git
-cd research-to-results
+git clone https://github.com/arvindersingh39/holdout-research.git
+cd holdout-research
 ./scripts/setup.sh
 ```
 
@@ -31,11 +34,11 @@ To run the real pipeline:
 ```bash
 # 1. Add ANTHROPIC_API_KEY and OPENROUTER_API_KEY to .env
 # 2. Build the sandbox (Docker must be running; about 2 GB)
-uv run r2r sandbox build
+uv run holdout sandbox build
 # 3. Check your keys and models (under $0.01)
 uv run python scripts/check_models.py
 # 4. Run the example proposal, which spends real API credit
-uv run r2r run --proposal examples/pilot_mc_pricer
+uv run holdout run --proposal examples/pilot_mc_pricer
 ```
 
 By default a run stops and asks you before going over $3 per milestone or $20 in total. You can
@@ -69,7 +72,7 @@ The [full network](docs/images/network_current.png) also shows the retry paths. 
 
 ## What makes it different
 
-- **Your proposal drives the work.** r2r doesn't invent research ideas. It carries out the
+- **Your proposal drives the work.** Holdout doesn't invent research ideas. It carries out the
   question and acceptance criteria you give it.
 - **Code makes the control decisions.** Stopping, routing, retries and budget checks are plain
   Python, never an LLM's judgement.
@@ -86,9 +89,9 @@ The [full network](docs/images/network_current.png) also shows the retry paths. 
 
 | Area | What you get |
 |---|---|
-| **Pipeline** | PDF ingestion, local embeddings, roadmap replanning, milestone splitting, `r2r extend` to continue a finished run |
+| **Pipeline** | PDF ingestion, local embeddings, roadmap replanning, milestone splitting, `holdout extend` to continue a finished run |
 | **Human control** | Gates in the terminal or on Telegram, redirect or stop at any gate, optional rule-based autopilot |
-| **Cost control** | Run and milestone caps checked before each call, a cost ledger (`r2r costs`), prompt caching, optional Langfuse tracing |
+| **Cost control** | Run and milestone caps checked before each call, a cost ledger (`holdout costs`), prompt caching, optional Langfuse tracing |
 | **Sandbox** | Docker with no network, no environment variables, no capabilities, a read-only root, a non-root user, and CPU, memory and process limits |
 | **Secrets** | Keys stay in `.env`, are redacted from logs, and never enter the sandbox |
 | **Untrusted input** | Proposal and paper text is wrapped as data, and instructions inside it are not followed |
@@ -99,14 +102,14 @@ The [full network](docs/images/network_current.png) also shows the retry paths. 
 
 | Command | What it does |
 |---|---|
-| `uv run r2r run --proposal <folder>` | Start a run (`--autopilot`, `--channel`, `--export-dir`) |
-| `uv run r2r resume <run>` | Continue from the last checkpoint or a pending gate |
-| `uv run r2r status <run>` | Show the current milestone, gate and spend |
-| `uv run r2r show <run> <contract>` | Show a contract from the run's state |
-| `uv run r2r costs <run>` | Show spend by role, model and milestone |
-| `uv run r2r extend <run> --proposal <folder>` | Add new work to a finished run |
-| `uv run r2r publish <run> --mode paper` | Build the paper or package |
-| `uv run r2r sandbox build` / `sandbox check` | Build the sandbox image, or test its limits |
+| `uv run holdout run --proposal <folder>` | Start a run (`--autopilot`, `--channel`, `--export-dir`) |
+| `uv run holdout resume <run>` | Continue from the last checkpoint or a pending gate |
+| `uv run holdout status <run>` | Show the current milestone, gate and spend |
+| `uv run holdout show <run> <contract>` | Show a contract from the run's state |
+| `uv run holdout costs <run>` | Show spend by role, model and milestone |
+| `uv run holdout extend <run> --proposal <folder>` | Add new work to a finished run |
+| `uv run holdout publish <run> --mode paper` | Build the paper or package |
+| `uv run holdout sandbox build` / `sandbox check` | Build the sandbox image, or test its limits |
 
 ## Results so far
 
@@ -134,7 +137,7 @@ the [redesign](docs/design-history.md) to the current network.
 ## Roadmap
 
 - [ ] Harden crash recovery so a killed step re-runs cleanly
-- [ ] Add a full-screen terminal app and an `r2r doctor` command
+- [ ] Add a full-screen terminal app and an `holdout doctor` command
 - [ ] Run the WhatsApp gates live
 
 ## Development
@@ -152,6 +155,11 @@ Further reading:
 - [Design history](docs/design-history.md), from the first sketch to the current network
 - [Design decisions](docs/DECISIONS.md), the numbered IDs you'll see in code comments
 - [Original build plan](docs/PLAN.md)
+
+## Earlier name
+
+This project began as `r2r` (research-to-results). The Python package, older docs and some messages
+still use that name, and the `r2r` command works the same as `holdout`.
 
 ## How it was built
 

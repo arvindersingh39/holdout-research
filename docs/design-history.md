@@ -1,6 +1,6 @@
 # Design history
 
-r2r's network changed a lot because real runs kept showing where it failed or wasted money. The
+Holdout's network changed a lot because real runs kept showing where it failed or wasted money. The
 reasons for each change are in [DECISIONS.md](DECISIONS.md).
 
 ## 1. First sketch

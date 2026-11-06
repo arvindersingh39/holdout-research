@@ -1,5 +1,5 @@
 [project]
-name = "r2r"
+name = "holdout-research"
 version = "0.1.0"
 description = "Turn a research proposal into a tested Python package and paper with LLM agents, plain-code controls and human gates"
 readme = "README.md"
@@ -26,7 +26,11 @@ dependencies = [
 ]
 
 [project.scripts]
-r2r = "r2r.cli:app"
+holdout = "r2r.cli:app"
+r2r = "r2r.cli:app"  # the earlier name still works
+
+[tool.uv.build-backend]
+module-name = "r2r"  # the Python package keeps its original name
 
 [build-system]
 requires = ["uv_build>=0.12.21,<0.13.0"]

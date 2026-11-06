@@ -1,6 +1,6 @@
-# CLAUDE.md — r2r (research-to-results agent framework)
+# CLAUDE.md — Holdout (research-to-results agent framework, package `r2r`)
 
-`r2r` turns a research proposal into publish-ready results with a pipeline of LLM
+Holdout turns a research proposal into publish-ready results with a pipeline of LLM
 agents and human approval gates. The original build plan is `docs/PLAN.md`; the current
 network is in `docs/architecture.md`, and decisions are logged in `docs/DECISIONS.md`.
 
@@ -61,10 +61,10 @@ uv run pytest -q -m docker                # sandbox tests (Docker must be runnin
 R2R_LIVE=1 uv run pytest tests/live -q    # live smoke tests: ask first
 uv run ruff check --fix && uv run ruff format
 uv run python scripts/check_models.py     # verify model IDs and API keys
-uv run r2r run --proposal examples/pilot_mc_pricer
-uv run r2r resume <run_id>
-uv run r2r costs <run_id>
-uv run r2r bot                            # WhatsApp gate bot: webhook + sender (Phase 7+)
+uv run holdout run --proposal examples/pilot_mc_pricer
+uv run holdout resume <run_id>
+uv run holdout costs <run_id>
+uv run holdout bot                            # WhatsApp gate bot: webhook + sender (Phase 7+)
 ```
 
 ## Conventions

@@ -54,7 +54,7 @@ if [ "$build_sandbox" = true ]; then
     exit 1
   fi
   echo "==> Building the sandbox image (about 2 GB, first time only)"
-  uv run r2r sandbox build
+  uv run holdout sandbox build
 fi
 
 if [ "$run_tests" = true ]; then
@@ -71,9 +71,9 @@ if [ "$docker_up" = false ]; then
   echo "  -  Install or start Docker, which runs the generated code"
 fi
 if [ "$build_sandbox" = false ]; then
-  echo "  -  Build the sandbox:       uv run r2r sandbox build"
+  echo "  -  Build the sandbox:       uv run holdout sandbox build"
 fi
 echo "  -  Check keys and models:   uv run python scripts/check_models.py    (under \$0.01)"
-echo "  -  Run the example:         uv run r2r run --proposal examples/pilot_mc_pricer"
+echo "  -  Run the example:         uv run holdout run --proposal examples/pilot_mc_pricer"
 echo
 echo "Live runs spend real API credit. Caps are in config/budgets.yaml."

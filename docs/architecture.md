@@ -50,7 +50,7 @@ runs/<run_id>/
 ├── data/               # your reference data and benchmarks.json
 ├── blobs/              # papers, logs, large text
 ├── vectors/            # Chroma index for this run
-├── checkpoints.sqlite  # LangGraph state, used by `r2r resume`
+├── checkpoints.sqlite  # LangGraph state, used by `holdout resume`
 └── ledger.sqlite       # every LLM call and its cost
 ```
 
