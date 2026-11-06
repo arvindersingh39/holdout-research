@@ -92,4 +92,4 @@ def test_cli_extend_reports_problems(tmp_path: Path, fake: FakeLLM, monkeypatch)
     missing = CliRunner().invoke(
         cli.app, ["extend", deps.run_id, "--proposal", str(tmp_path), *base]
     )
-    assert missing.exit_code == 2 and "proposal.md not found" in missing.output
+    assert missing.exit_code == 2 and "proposal.md not found" in " ".join(missing.output.split())
